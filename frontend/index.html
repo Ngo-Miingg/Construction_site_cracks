@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ Thống Phát Hiện Vết Nứt Bề Mặt v2.4</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
+    <link rel="stylesheet" href="/static/style.css?v=20260309b">
+</head>
+<body>
+    <!-- Dark Tech Background with Grid and Animated Streams -->
+    <div class="dark-tech-background" id="techBackground">
+        <!-- Grid Lines -->
+        <div class="grid-lines"></div>
+        
+        <!-- Mouse Trail Container -->
+        <canvas id="mouseTrailCanvas"></canvas>
+        
+        <!-- Moving Dots -->
+        <div class="moving-dots">
+            <div class="dot dot-1"></div>
+            <div class="dot dot-2"></div>
+            <div class="dot dot-3"></div>
+            <div class="dot dot-4"></div>
+            <div class="dot dot-5"></div>
+            <div class="dot dot-6"></div>
+            <div class="dot dot-7"></div>
+            <div class="dot dot-8"></div>
+            <div class="dot dot-9"></div>
+            <div class="dot dot-10"></div>
+            <div class="dot dot-11"></div>
+            <div class="dot dot-12"></div>
+            <div class="dot dot-13"></div>
+            <div class="dot dot-14"></div>
+            <div class="dot dot-15"></div>
+            <div class="dot dot-16"></div>
+            <div class="dot dot-17"></div>
+            <div class="dot dot-18"></div>
+            <div class="dot dot-19"></div>
+            <div class="dot dot-20"></div>
+        </div>
+        
+        <!-- Rotating Streams -->
+        <div class="rotating-streams">
+            <div class="stream stream-1"></div>
+            <div class="stream stream-2"></div>
+            <div class="stream stream-3"></div>
+            <div class="stream stream-4"></div>
+            <div class="stream stream-5"></div>
+            <div class="stream stream-6"></div>
+        </div>
+        
+        <!-- Subtle Glow Effects -->
+        <div class="glow-effects">
+            <div class="glow glow-1"></div>
+            <div class="glow glow-2"></div>
+            <div class="glow glow-3"></div>
+        </div>
+    </div>
+
+    <!-- Top Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark top-navbar">
+        <div class="container-fluid">
+            <a class="navbar-brand d-flex align-items-center" href="#">
+                <div class="brand-logo">
+                    <img src="/static/logo.jpg" alt="Logo">
+                </div>
+                <div class="ms-3">
+                    <div class="brand-title">Hệ thống phát hiện vết nứt bề mặt</div>
+                    <div class="brand-subtitle">Deep Learning Surface Analysis v2.4</div>
+                </div>
+            </a>
+            <div class="navbar-nav ms-auto d-flex flex-row align-items-center gap-3">
+                <a class="nav-link" href="#"><i class="bi bi-question-circle"></i> Bảng điều khiển</a>
+                <a class="nav-link" href="#"><i class="bi bi-file-text"></i> Dự án</a>
+                <a class="nav-link" href="#"><i class="bi bi-info-circle"></i> Báo cáo</a>
+                <a class="nav-link" href="#"><i class="bi bi-gear"></i></a>
+                <a class="nav-link" href="#"><i class="bi bi-bell"></i></a>
+                <div class="user-avatar">
+                    <img src="https://ui-avatars.com/api/?name=User&background=3498db&color=fff" alt="User">
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="main-container">
+        <!-- Sidebar - History -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <i class="bi bi-clock-history me-2"></i>
+                Lịch sử kiểm tra
+                <button class="btn btn-sm btn-outline-light ms-auto" onclick="clearHistory()">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+            
+            <div class="history-list" id="historyList">
+                <!-- History items will be added here dynamically -->
+                <div class="text-center text-muted py-4">
+                    <i class="bi bi-inbox" style="font-size: 2rem;"></i>
+                    <p class="mt-2">Chưa có lịch sử</p>
+                </div>
+            </div>
+            
+            <button class="btn btn-primary w-100 mt-3" onclick="showAllHistory()">
+                Xem tất cả lịch sử
+            </button>
+        </div>
+
+        <!-- Main Content -->
+        <div class="content-area">
+            <!-- Upload Section -->
+            <div class="upload-section" id="uploadSection">
+                <div class="row g-4">
+                    <div class="col-md-6">
+                        <div class="upload-card" onclick="document.getElementById('fileInput').click()">
+                            <i class="bi bi-file-earmark-arrow-up upload-card-icon"></i>
+                            <h4>Tải ảnh lên</h4>
+                            <p>Hỗ trợ JPG, PNG, TIFF (Max 50MB)</p>
+                            <input type="file" id="fileInput" accept="image/*" style="display: none;">
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="upload-card" onclick="openCamera()">
+                            <i class="bi bi-camera upload-card-icon"></i>
+                            <h4>Quét trực tiếp</h4>
+                            <p>Kết nối Camera IP hoặc Web-cam</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analysis Section -->
+            <div class="analysis-section" id="analysisSection" style="display: none;">
+                <!-- Image Preview with Detection -->
+                <div class="detection-area">
+                    <div class="detection-header">
+                        <i class="bi bi-bounding-box me-2"></i>
+                        Khu vực phân tích
+                        <button class="btn btn-sm btn-outline-danger ms-auto" onclick="resetAnalysis()">
+                            <i class="bi bi-x-circle"></i> Hủy
+                        </button>
+                    </div>
+                    <div class="image-container" id="imageContainer">
+                        <img id="analysisImage" src="" alt="Analysis">
+                        <canvas id="detectionCanvas"></canvas>
+                    </div>
+                </div>
+
+                <!-- Analysis Progress -->
+                <div class="analysis-progress" id="analysisProgress" style="display: none;">
+                    <div class="progress-content">
+                        <div class="progress-icon">
+                            <i class="bi bi-gear-fill rotating"></i>
+                        </div>
+                        <h4>Đang phân tích...</h4>
+                        <p class="progress-status" id="progressStatus">Khởi tạo mô hình AI</p>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar-fill" id="progressBarFill"></div>
+                        </div>
+                        <div class="progress-percentage" id="progressPercentage">0%</div>
+                    </div>
+                </div>
+
+                <!-- Basic Result -->
+                <div class="result-card mt-4" id="basicResultCard" style="display: none;">
+                    <div class="result-status" id="resultStatus">
+                        <div class="status-icon" id="statusIcon"></div>
+                        <div class="status-text">
+                            <h3 id="statusTitle"></h3>
+                            <p id="statusDescription"></p>
+                        </div>
+                    </div>
+                    <div class="confidence-display">
+                        <span>Độ tin cậy:</span>
+                        <strong id="confidenceValue"></strong>
+                    </div>
+                </div>
+
+                <!-- Deep Analysis Button -->
+                <div class="text-center mt-4" id="deepAnalysisSection" style="display: none;">
+                    <button class="btn btn-lg btn-deep-analysis-main" onclick="performDeepAnalysis()">
+                        <i class="bi bi-gear-fill me-2"></i>
+                        Phân tích chuyên sâu 5 lớp
+                        <i class="bi bi-chevron-right ms-2"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div id="streamSummarySection" style="display: none;"></div>
+        </div>
+    </div>
+
+    <!-- Camera Modal -->
+    <div class="modal fade" id="cameraModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Quét Bề Mặt Trực Tiếp</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <div class="stream-preview-wrap">
+                        <video id="cameraStream" autoplay playsinline></video>
+                        <canvas id="streamOverlayCanvas"></canvas>
+                    </div>
+                    <canvas id="cameraCanvas" style="display: none;"></canvas>
+                    <div id="streamLiveStatus" class="stream-live-status">San sang stream basic realtime</div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-primary" id="streamStartBtn" onclick="startRealtimeScan()">
+                        <i class="bi bi-play-fill me-1"></i>Bat stream realtime
+                    </button>
+                    <button class="btn btn-outline-warning" id="streamStopBtn" onclick="stopRealtimeScan(true)" disabled>
+                        <i class="bi bi-stop-fill me-1"></i>Dung & tong hop
+                    </button>
+                    <button class="btn btn-primary" id="captureImageBtn" onclick="captureImage()">
+                        <i class="bi bi-camera-fill me-2"></i>Chụp Ảnh
+                    </button>
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Dong</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pricing Modal -->
+    <div class="modal fade" id="pricingModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-star-fill text-warning me-2"></i>
+                        Nâng Cấp Gói Premium - Phân Tích Chuyên Sâu
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="pricing-header text-center mb-4">
+                        <h4>Chọn gói phù hợp với nhu cầu của bạn</h4>
+                        <p class="text-muted">Phân tích chuyên sâu 5 lớp với độ chính xác cao</p>
+                    </div>
+                    
+                    <div class="row g-4">
+                        <!-- Basic Plan -->
+                        <div class="col-md-4">
+                            <div class="pricing-card">
+                                <div class="pricing-badge">Cơ Bản</div>
+                                <div class="pricing-icon">
+                                    <i class="bi bi-box"></i>
+                                </div>
+                                <h3>Gói Cơ Bản</h3>
+                                <div class="pricing-price">
+                                    <span class="price">299.000đ</span>
+                                    <span class="period">/tháng</span>
+                                </div>
+                                <ul class="pricing-features">
+                                    <li><i class="bi bi-check-circle-fill"></i> 50 lượt phân tích/tháng</li>
+                                    <li><i class="bi bi-check-circle-fill"></i> Phân tích 5 lớp chi tiết</li>
+                                    <li><i class="bi bi-check-circle-fill"></i> Lưu trữ 30 ngày</li>
+                                    <li><i class="bi bi-check-circle-fill"></i> Báo cáo PDF</li>
+                                    <li><i class="bi bi-x-circle text-muted"></i> Hỗ trợ ưu tiên</li>
+                                    <li><i class="bi bi-x-circle text-muted"></i> API Access</li>
+                                </ul>
+                                <button class="btn btn-outline-primary w-100" onclick="selectPlan('basic')">
+                                    Chọn Gói
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Pro Plan -->
+                        <div class="col-md-4">
+                            <div class="pricing-card pricing-card-featured">
+                                <div class="pricing-badge pricing-badge-featured">Phổ Biến</div>
+                                <div class="pricing-icon">
+                                    <i class="bi bi-star-fill"></i>
+                                </div>
+                                <h3>Gói Pro</h3>
+                                <div class="pricing-price">
+                                    <span class="price">599.000đ</span>
+                                    <span class="period">/tháng</span>
+                                </div>
+                                <ul class="pricing-features">
+                                    <li><i class="bi bi-check-circle-fill"></i> 200 lượt phân tích/tháng</li>
+                                    <li><i class="bi bi-check-circle-fill"></i> Phân tích 5 lớp chi tiết</li>
+                                    <li><i class="bi bi-check-circle-fill"></i> Lưu trữ 90 ngày</li>
+                                    <li><i class="bi bi-check-circle-fill"></i> Báo cáo PDF & Excel</li>
+                                    <li><i class="bi bi-check-circle-fill"></i> Hỗ trợ ưu tiên</li>
+                                    <li><i class="bi bi-x-circle text-muted"></i> API Access</li>
+                                </ul>
+                                <button class="btn btn-primary w-100" onclick="selectPlan('pro')">
+                                    Chọn Gói
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Enterprise Plan -->
+                        <div class="col-md-4">
+                            <div class="pricing-card">
+                                <div class="pricing-badge">Doanh Nghiệp</div>
+                                <div class="pricing-icon">
+                                    <i class="bi bi-building"></i>
+                                </div>
+                                <h3>Gói Enterprise</h3>
+                                <div class="pricing-price">
+                                    <span class="price">1.499.000đ</span>
+                                    <span class="period">/tháng</span>
+                                </div>
+                                <ul class="pricing-features">
+                                    <li><i class="bi bi-check-circle-fill"></i> Không giới hạn phân tích</li>
+                                    <li><i class="bi bi-check-circle-fill"></i> Phân tích 5 lớp chi tiết</li>
+                                    <li><i class="bi bi-check-circle-fill"></i> Lưu trữ vĩnh viễn</li>
+                                    <li><i class="bi bi-check-circle-fill"></i> Tất cả định dạng báo cáo</li>
+                                    <li><i class="bi bi-check-circle-fill"></i> Hỗ trợ 24/7</li>
+                                    <li><i class="bi bi-check-circle-fill"></i> API Access đầy đủ</li>
+                                </ul>
+                                <button class="btn btn-outline-primary w-100" onclick="selectPlan('enterprise')">
+                                    Chọn Gói
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="text-center mt-4">
+                        <p class="text-muted">
+                            <i class="bi bi-shield-check me-2"></i>
+                            Thanh toán an toàn - Hủy bất cứ lúc nào
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/script.js?v=20260309k"></script>
+</body>
+</html>

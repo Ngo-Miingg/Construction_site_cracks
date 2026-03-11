@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+runs/
+outputs/
+models/*.pt
+!models/.gitkeep
+RDD_BIN_REMAIN_STRICT/
+RDD_SPLIT/**/.cache/
+RDD_SPLIT/**/__pycache__/
+*.ipynb_checkpoints
+_preflight_work/
+*.zip
