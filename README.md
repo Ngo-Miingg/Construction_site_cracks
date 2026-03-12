@@ -13,19 +13,26 @@ Deployment-focused project for crack detection with:
 - `configs/dataset5class.yaml`: stage2 class mapping
 - `demo/app_streamlit.py`: optional Streamlit fallback
 
-## Important note about model weights
+## Model weights (Git LFS)
 
-Model files are **not committed** to GitHub (size > 100MB):
+Model files are committed via **Git LFS**:
 
 - `models/best1class.pt`
 - `models/best5class.pt`
 
-Place these files manually into `models/` before running.
+After clone, run:
+
+```bash
+git lfs install
+git lfs pull
+```
 
 ## Quick start (Windows - recommended)
 
 ```bat
 cd /d D:\NCKH_25-26\rtdetr_rddsplit_demo
+git lfs install
+git lfs pull
 
 if not exist .venv\Scripts\python.exe py -3.11 -m venv .venv
 .\.venv\Scripts\python -m pip install --upgrade pip
@@ -39,6 +46,8 @@ Open: `http://127.0.0.1:8000`
 ## Quick start (Linux/macOS)
 
 ```bash
+git lfs install
+git lfs pull
 python -m venv .venv
 source .venv/bin/activate
 pip install -U pip
@@ -122,4 +131,3 @@ Key groups:
 3. Read segment summary from `GET /api/stream/session/{session_id}/summary`
 4. Optional deep scan on selected frames (`POST /api/analyze/deep`)
 5. Export product report (`/report` or `/report/bundle`)
-
