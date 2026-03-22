@@ -6,8 +6,6 @@
 [![Git LFS](https://img.shields.io/badge/Git%20LFS-Model%20weights-blue)](https://git-lfs.com/)
 
 Du an web + API phuc vu detect vet nut mat duong/be mat cong truong theo **5 lop hu hong** bang **RT-DETR**.  
-Ban hien tai da toi gian ve 1 pipeline: chi dung **model 5-class** (`models/best5class.pt`).
-
 ---
 
 ## 1) Giao dien thuc te
@@ -249,6 +247,8 @@ Xem file `.env.example`, cac nhom quan trong:
 
 ## 16) Huong phat trien tiep
 
+- Áp dụng các kỹ thuật augmentation chuyên biệt cho môi trường đường
+- Đề xuất việc tinh chỉnh phần CNN Backbone của RT-DETR để trích xuất các đặc trưng chi tiết ở độ phân giải cao hơn
 - Them auth + role cho API.
 - Export bao cao PDF theo mau nghiem thu.
 - Them queue/batch infer cho camera fleet.
