@@ -255,5 +255,3 @@ Xem file `.env.example`, cac nhom quan trong:
 - Dashboard thong ke theo du an/thoi gian.
 
 ---
-
-Neu ban can, minh co the viet tiep ban README song ngu (VI/EN) de repo trong "chuyen nghiep" hon khi share cong khai.
