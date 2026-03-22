@@ -9,6 +9,7 @@ import sqlite3
 import io
 import csv
 import zipfile
+import math
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from pathlib import Path
 from typing import Any
@@ -16,10 +17,10 @@ from typing import Any
 import cv2
 import numpy as np
 import yaml
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from ultralytics import RTDETR
+from ultralytics import YOLO
 
 try:
     import torch
@@ -41,21 +42,13 @@ def env_path(name: str, *defaults: Path) -> Path:
     return defaults[0]
 
 
-MODEL_BASIC_PATH = env_path(
-    "MODEL_BASIC_PATH",
-    ROOT / "models" / "best1class.pt",
-    ROOT / "best1class.pt",
-)
-MODEL_DEEP_PATH = env_path(
-    "MODEL_DEEP_PATH",
+MODEL_5CLASS_PATH = env_path(
+    "MODEL_5CLASS_PATH",
     ROOT / "models" / "best5class.pt",
     ROOT / "best5class.pt",
 )
-DATASET1_YAML_PATH = env_path(
-    "DATASET1_YAML_PATH",
-    ROOT / "configs" / "dataset1class.yaml",
-    ROOT / "dataset1class.yaml",
-)
+MODEL_DEEP_PATH = env_path("MODEL_DEEP_PATH", MODEL_5CLASS_PATH)
+MODEL_BASIC_PATH = MODEL_DEEP_PATH
 DATASET5_YAML_PATH = env_path(
     "DATASET5_YAML_PATH",
     ROOT / "configs" / "dataset5class.yaml",
@@ -109,31 +102,31 @@ BASIC_CONF_MIN = env_float("BASIC_CONF_MIN", 0.25)
 BASIC_POS_CONF = env_float("BASIC_POS_CONF", 0.35)
 BASIC_REVIEW_CONF = env_float("BASIC_REVIEW_CONF", 0.20)
 BASIC_IMGSZ_DEFAULT = env_int("BASIC_IMGSZ_DEFAULT", 640)
-BASIC_ENABLE_DEEP_ASSIST = env_bool("BASIC_ENABLE_DEEP_ASSIST", True)
-BASIC_DEEP_ASSIST_CONF = env_float("BASIC_DEEP_ASSIST_CONF", 0.18)
-BASIC_DEEP_ASSIST_IMGSZ = env_int("BASIC_DEEP_ASSIST_IMGSZ", 960)
+BASIC_ENABLE_DEEP_ASSIST = env_bool("BASIC_ENABLE_DEEP_ASSIST", False)
+BASIC_DEEP_ASSIST_CONF = env_float("BASIC_DEEP_ASSIST_CONF", 0.25)
+BASIC_DEEP_ASSIST_IMGSZ = env_int("BASIC_DEEP_ASSIST_IMGSZ", 640)
 BASIC_DEEP_ASSIST_IOU = env_float("BASIC_DEEP_ASSIST_IOU", 0.60)
-DEEP_CONF_DEFAULT = env_float("DEEP_CONF_DEFAULT", 0.18)
-DEEP_IMGSZ_DEFAULT = env_int("DEEP_IMGSZ_DEFAULT", 896)
-DEEP_FALLBACK_BASIC_CONF = env_float("DEEP_FALLBACK_BASIC_CONF", 0.20)
+DEEP_CONF_DEFAULT = env_float("DEEP_CONF_DEFAULT", 0.25)
+DEEP_IMGSZ_DEFAULT = env_int("DEEP_IMGSZ_DEFAULT", 640)
+DEEP_FALLBACK_BASIC_CONF = env_float("DEEP_FALLBACK_BASIC_CONF", 0.25)
 DEEP_FUSION_IOU = env_float("DEEP_FUSION_IOU", 0.20)
-DEEP_ENABLE_BASIC_FALLBACK = env_bool("DEEP_ENABLE_BASIC_FALLBACK", True)
-DEEP_ENABLE_TTA = env_bool("DEEP_ENABLE_TTA", True)
-DEEP_TTA_SCALES = env_float_list("DEEP_TTA_SCALES", [1.0, 1.15])
-DEEP_TTA_HFLIP = env_bool("DEEP_TTA_HFLIP", True)
-DEEP_ENABLE_TILING = env_bool("DEEP_ENABLE_TILING", True)
-DEEP_TILE_SIZE = env_int("DEEP_TILE_SIZE", 960)
-DEEP_TILE_OVERLAP = env_int("DEEP_TILE_OVERLAP", 224)
+DEEP_ENABLE_BASIC_FALLBACK = env_bool("DEEP_ENABLE_BASIC_FALLBACK", False)
+DEEP_ENABLE_TTA = env_bool("DEEP_ENABLE_TTA", False)
+DEEP_TTA_SCALES = env_float_list("DEEP_TTA_SCALES", [1.0])
+DEEP_TTA_HFLIP = env_bool("DEEP_TTA_HFLIP", False)
+DEEP_ENABLE_TILING = env_bool("DEEP_ENABLE_TILING", False)
+DEEP_TILE_SIZE = env_int("DEEP_TILE_SIZE", 640)
+DEEP_TILE_OVERLAP = env_int("DEEP_TILE_OVERLAP", 128)
 DEEP_ENSEMBLE_NMS_IOU = env_float("DEEP_ENSEMBLE_NMS_IOU", 0.70)
 DEEP_MAX_RETURN = env_int("DEEP_MAX_RETURN", 300)
-DEEP_ENABLE_ROI_FILTER = env_bool("DEEP_ENABLE_ROI_FILTER", True)
+DEEP_ENABLE_ROI_FILTER = env_bool("DEEP_ENABLE_ROI_FILTER", False)
 DEEP_ROI_TOP_EXCLUDE_RATIO = env_float("DEEP_ROI_TOP_EXCLUDE_RATIO", 0.08)
-DEEP_ENABLE_WATERMARK_MASK = env_bool("DEEP_ENABLE_WATERMARK_MASK", True)
+DEEP_ENABLE_WATERMARK_MASK = env_bool("DEEP_ENABLE_WATERMARK_MASK", False)
 DEEP_WATERMARK_RIGHT_RATIO = env_float("DEEP_WATERMARK_RIGHT_RATIO", 0.45)
 DEEP_WATERMARK_BOTTOM_RATIO = env_float("DEEP_WATERMARK_BOTTOM_RATIO", 0.24)
 DEEP_MIN_AREA_PX = env_float("DEEP_MIN_AREA_PX", 16.0)
 DEEP_MIN_AREA_RATIO = env_float("DEEP_MIN_AREA_RATIO", 0.000003)
-DEEP_THIN_CRACK_RESCUE = env_bool("DEEP_THIN_CRACK_RESCUE", True)
+DEEP_THIN_CRACK_RESCUE = env_bool("DEEP_THIN_CRACK_RESCUE", False)
 DEEP_THIN_CRACK_MIN_AR = env_float("DEEP_THIN_CRACK_MIN_AR", 6.0)
 DEEP_THIN_CRACK_MIN_CONF = env_float("DEEP_THIN_CRACK_MIN_CONF", 0.18)
 QA_LOW_CONF_THRESH = env_float("QA_LOW_CONF_THRESH", 0.45)
@@ -152,11 +145,12 @@ STREAM_TRACK_MAX_AGE = env_int("STREAM_TRACK_MAX_AGE", 10)
 STREAM_MAX_SESSIONS = env_int("STREAM_MAX_SESSIONS", 32)
 STREAM_SESSION_TTL_SEC = env_int("STREAM_SESSION_TTL_SEC", 4 * 3600)
 STREAM_STATE_DB_PATH = Path(os.getenv("STREAM_STATE_DB_PATH", ROOT / "runs" / "stream_state.db"))
+PROJECT_STORAGE_ROOT = Path(os.getenv("PROJECT_STORAGE_ROOT", ROOT / "runs" / "projects"))
 STREAM_DB_SYNC_EVERY = env_int("STREAM_DB_SYNC_EVERY", 1)
 AUDIT_LOG_ENABLE = env_bool("AUDIT_LOG_ENABLE", True)
 AUDIT_DB_MAX_EVENTS = env_int("AUDIT_DB_MAX_EVENTS", 50000)
-PREPROCESS_ENABLE = env_bool("PREPROCESS_ENABLE", True)
-PREPROCESS_ENABLE_CLAHE = env_bool("PREPROCESS_ENABLE_CLAHE", True)
+PREPROCESS_ENABLE = env_bool("PREPROCESS_ENABLE", False)
+PREPROCESS_ENABLE_CLAHE = env_bool("PREPROCESS_ENABLE_CLAHE", False)
 PREPROCESS_CLAHE_CLIP = env_float("PREPROCESS_CLAHE_CLIP", 2.0)
 PREPROCESS_CLAHE_TILE = env_int("PREPROCESS_CLAHE_TILE", 8)
 PREPROCESS_CAMERA_ALPHA = env_float("PREPROCESS_CAMERA_ALPHA", 1.08)
@@ -164,10 +158,11 @@ PREPROCESS_CAMERA_BETA = env_float("PREPROCESS_CAMERA_BETA", 2.0)
 PREPROCESS_NIGHT_ALPHA = env_float("PREPROCESS_NIGHT_ALPHA", 1.20)
 PREPROCESS_NIGHT_BETA = env_float("PREPROCESS_NIGHT_BETA", 5.0)
 BASIC_DEEP_ASSIST_TIMEOUT_MS = env_int("BASIC_DEEP_ASSIST_TIMEOUT_MS", 900)
-BASIC_SCENE = os.getenv("BASIC_SCENE", "auto").strip().lower()
-DEEP_SCENE = os.getenv("DEEP_SCENE", "auto").strip().lower()
+BASIC_SCENE = os.getenv("BASIC_SCENE", "default").strip().lower()
+DEEP_SCENE = os.getenv("DEEP_SCENE", "default").strip().lower()
+ENABLE_SCENE_PROFILE = env_bool("ENABLE_SCENE_PROFILE", False)
+BASIC_ENABLE_POSTPROCESS = env_bool("BASIC_ENABLE_POSTPROCESS", False)
 
-DEFAULT_STAGE1_NAMES = {0: "vet nut"}
 DEFAULT_STAGE2_NAMES = {
     0: "vet nut doc",
     1: "vet nut ngang",
@@ -187,7 +182,7 @@ CLASS_NAME_MAP_VI = {
     "crack_unclassified": "vet nut chua phan loai",
 }
 
-_model_cache: dict[str, tuple[int, RTDETR]] = {}
+_model_cache: dict[str, tuple[int, Any]] = {}
 _stream_sessions: dict[str, dict[str, Any]] = {}
 _stream_lock = threading.Lock()
 _stream_db_lock = threading.Lock()
@@ -248,6 +243,8 @@ def normalize_scene(scene: str, image_bgr: np.ndarray) -> str:
 
 
 def apply_scene_profile(stage: str, conf: float, imgsz: int, scene: str) -> tuple[float, int]:
+    if not ENABLE_SCENE_PROFILE:
+        return clamp_float(conf, 0.01, 0.99), clamp_int(imgsz, 320, 1536)
     # Scene-aware runtime profile keeps one API but adapts sensitivity by context.
     profile = {
         "default": {"conf_scale": 1.00, "imgsz_scale": 1.00},
@@ -292,14 +289,25 @@ def preprocess_image_for_inference(image_bgr: np.ndarray, source: str, scene: st
     return out
 
 
-def load_model_cached(model_path: Path) -> RTDETR:
+def normalize_confidence(value: Any) -> float:
+    try:
+        conf = float(value)
+    except Exception:
+        return 0.0
+    if not math.isfinite(conf):
+        return 0.0
+    return max(0.0, min(1.0, conf))
+
+
+def load_model_cached(model_path: Path) -> Any:
     if not model_path.exists():
         raise FileNotFoundError(f"Missing model: {model_path}")
     version = int(model_path.stat().st_mtime_ns)
     key = str(model_path.resolve())
     if key in _model_cache and _model_cache[key][0] == version:
         return _model_cache[key][1]
-    model = RTDETR(str(model_path))
+    # Use Ultralytics' generic loader so both YOLO and RT-DETR weights work safely.
+    model = YOLO(str(model_path))
     _model_cache[key] = (version, model)
     return model
 
@@ -318,7 +326,7 @@ def decode_upload(uploaded_file: UploadFile) -> np.ndarray:
     return img
 
 
-def resolve_names(model: RTDETR, fallback_names: dict[int, str]) -> dict[int, str]:
+def resolve_names(model: Any, fallback_names: dict[int, str]) -> dict[int, str]:
     names = getattr(model.model, "names", None)
     if isinstance(names, dict) and names:
         return localize_name_map({int(k): str(v) for k, v in names.items()})
@@ -375,7 +383,7 @@ def run_prediction(
                 {
                     "class_id": cls_id,
                     "class_name": names_map.get(cls_id, f"class_{cls_id}"),
-                    "confidence": float(box.conf.item()) if box.conf is not None else 0.0,
+                    "confidence": normalize_confidence(box.conf.item() if box.conf is not None else 0.0),
                     "bbox_xyxy": [x1, y1, x2, y2],
                 }
             )
@@ -586,6 +594,57 @@ def enrich_detection_geometry(det: dict[str, Any], w: int, h: int) -> dict[str, 
     out["center_xy"] = [float(cx), float(cy)]
     out["class_weight"] = crack_class_weight(str(det.get("class_name", "")))
     return out
+
+
+def postprocess_basic_detections(
+    detections: list[dict[str, Any]],
+    w: int,
+    h: int,
+) -> list[dict[str, Any]]:
+    if not BASIC_ENABLE_POSTPROCESS:
+        raw_out: list[dict[str, Any]] = []
+        for det in detections:
+            raw_out.append(
+                {
+                    "class_id": int(det.get("class_id", 0)),
+                    "class_name": localize_class_name(str(det.get("class_name", "vet nut"))),
+                    "confidence": normalize_confidence(det.get("confidence", 0.0)),
+                    "bbox_xyxy": clamp_bbox_to_image(
+                        [float(v) for v in det.get("bbox_xyxy", [0, 0, 0, 0])], w, h
+                    ),
+                    "source": str(det.get("source", "basic")),
+                }
+            )
+        return raw_out
+
+    cleaned: list[dict[str, Any]] = []
+    image_area = max(1.0, float(w * h))
+    for det in detections:
+        box = clamp_bbox_to_image([float(v) for v in det.get("bbox_xyxy", [0, 0, 0, 0])], w, h)
+        x1, y1, x2, y2 = box
+        bw = max(0.0, x2 - x1)
+        bh = max(0.0, y2 - y1)
+        if bw < 2.0 or bh < 2.0:
+            continue
+        area_ratio = (bw * bh) / image_area
+        width_ratio = bw / max(1.0, float(w))
+        height_ratio = bh / max(1.0, float(h))
+        # Drop obviously bad "strip" boxes before showing/fusing them.
+        if area_ratio > 0.75:
+            continue
+        if width_ratio > 0.97 and height_ratio > 0.12:
+            continue
+        cleaned.append(
+            {
+                "class_id": 0,
+                "class_name": "vet nut",
+                "confidence": normalize_confidence(det.get("confidence", 0.0)),
+                "bbox_xyxy": box,
+                "source": str(det.get("source", "basic")),
+            }
+        )
+
+    return nms_detections(cleaned, iou_thr=0.45, max_keep=8, class_aware=False)
 
 
 def apply_post_filters(
@@ -839,6 +898,7 @@ def run_prediction_with_timeout(
 
 def ensure_stream_db() -> None:
     STREAM_STATE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PROJECT_STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
     with _stream_db_lock:
         conn = sqlite3.connect(str(STREAM_STATE_DB_PATH))
         try:
@@ -865,6 +925,39 @@ def ensure_stream_db() -> None:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS analysis_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts REAL NOT NULL,
+                    project_id INTEGER NOT NULL DEFAULT 1,
+                    stage TEXT NOT NULL,
+                    has_crack INTEGER NOT NULL,
+                    max_confidence REAL NOT NULL,
+                    detections_count INTEGER NOT NULL,
+                    infer_time_ms REAL NOT NULL,
+                    input_source TEXT NOT NULL,
+                    scene TEXT NOT NULL,
+                    input_path TEXT NOT NULL DEFAULT '',
+                    output_path TEXT NOT NULL DEFAULT '',
+                    payload_json TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS projects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    description TEXT NOT NULL DEFAULT '',
+                    created_ts REAL NOT NULL,
+                    updated_ts REAL NOT NULL,
+                    is_archived INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+            _ensure_analysis_history_columns(conn)
+            _ensure_default_project(conn)
+            conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_audit_events_ts
                 ON audit_events(ts)
                 """
@@ -881,9 +974,59 @@ def ensure_stream_db() -> None:
                 ON audit_events(session_id)
                 """
             )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_analysis_history_ts
+                ON analysis_history(ts)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_analysis_history_project
+                ON analysis_history(project_id)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_projects_updated
+                ON projects(updated_ts)
+                """
+            )
             conn.commit()
         finally:
             conn.close()
+
+
+def _get_table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return {str(r[1]) for r in rows if len(r) > 1}
+
+
+def _ensure_analysis_history_columns(conn: sqlite3.Connection) -> None:
+    cols = _get_table_columns(conn, "analysis_history")
+    if "project_id" not in cols:
+        conn.execute("ALTER TABLE analysis_history ADD COLUMN project_id INTEGER NOT NULL DEFAULT 1")
+    if "input_path" not in cols:
+        conn.execute("ALTER TABLE analysis_history ADD COLUMN input_path TEXT NOT NULL DEFAULT ''")
+    if "output_path" not in cols:
+        conn.execute("ALTER TABLE analysis_history ADD COLUMN output_path TEXT NOT NULL DEFAULT ''")
+
+
+def _ensure_default_project(conn: sqlite3.Connection) -> int:
+    row = conn.execute(
+        "SELECT id FROM projects WHERE is_archived = 0 ORDER BY id ASC LIMIT 1"
+    ).fetchone()
+    if row:
+        return int(row[0])
+    now = _now_s()
+    cur = conn.execute(
+        """
+        INSERT INTO projects(name, description, created_ts, updated_ts, is_archived)
+        VALUES (?, ?, ?, ?, 0)
+        """,
+        ("Du an mac dinh", "Du an tao tu dong de luu ket qua detect", now, now),
+    )
+    return int(cur.lastrowid or 1)
 
 
 def save_stream_session_to_db(session: dict[str, Any]) -> None:
@@ -1030,6 +1173,357 @@ def query_audit_events(
             }
         )
     return out
+
+
+def _resolve_project_id(conn: sqlite3.Connection, project_id: int | None = None) -> int:
+    if project_id is not None and int(project_id) > 0:
+        row = conn.execute(
+            "SELECT id FROM projects WHERE id = ? AND is_archived = 0",
+            (int(project_id),),
+        ).fetchone()
+        if row:
+            return int(row[0])
+    return _ensure_default_project(conn)
+
+
+def list_projects(limit: int = 200) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(1000, int(limit)))
+    out: list[dict[str, Any]] = []
+    with _stream_db_lock:
+        conn = sqlite3.connect(str(STREAM_STATE_DB_PATH))
+        try:
+            rows = conn.execute(
+                """
+                SELECT p.id, p.name, p.description, p.created_ts, p.updated_ts,
+                       COALESCE(COUNT(h.id), 0) AS history_count
+                FROM projects p
+                LEFT JOIN analysis_history h ON h.project_id = p.id
+                WHERE p.is_archived = 0
+                GROUP BY p.id
+                ORDER BY p.updated_ts DESC, p.id DESC
+                LIMIT ?
+                """,
+                (safe_limit,),
+            ).fetchall()
+        finally:
+            conn.close()
+    for row in rows:
+        pid, name, desc, created_ts, updated_ts, count = row
+        out.append(
+            {
+                "id": int(pid),
+                "name": str(name),
+                "description": str(desc or ""),
+                "created_ts": float(created_ts),
+                "updated_ts": float(updated_ts),
+                "history_count": int(count),
+            }
+        )
+    return out
+
+
+def create_project(name: str, description: str = "") -> dict[str, Any]:
+    clean_name = str(name or "").strip()
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="Project name is required")
+    if len(clean_name) > 100:
+        raise HTTPException(status_code=400, detail="Project name is too long (max 100 chars)")
+    clean_desc = str(description or "").strip()
+    now = _now_s()
+    with _stream_db_lock:
+        conn = sqlite3.connect(str(STREAM_STATE_DB_PATH))
+        try:
+            row = conn.execute(
+                "SELECT id FROM projects WHERE LOWER(name) = LOWER(?) AND is_archived = 0",
+                (clean_name,),
+            ).fetchone()
+            if row:
+                pid = int(row[0])
+            else:
+                cur = conn.execute(
+                    """
+                    INSERT INTO projects(name, description, created_ts, updated_ts, is_archived)
+                    VALUES (?, ?, ?, ?, 0)
+                    """,
+                    (clean_name, clean_desc, now, now),
+                )
+                pid = int(cur.lastrowid)
+            conn.commit()
+        finally:
+            conn.close()
+    return {"id": pid, "name": clean_name, "description": clean_desc}
+
+
+def get_project(project_id: int | None = None) -> dict[str, Any]:
+    with _stream_db_lock:
+        conn = sqlite3.connect(str(STREAM_STATE_DB_PATH))
+        try:
+            pid = _resolve_project_id(conn, project_id=project_id)
+            row = conn.execute(
+                """
+                SELECT id, name, description, created_ts, updated_ts
+                FROM projects
+                WHERE id = ?
+                """,
+                (int(pid),),
+            ).fetchone()
+        finally:
+            conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Project not found")
+    rid, name, desc, created_ts, updated_ts = row
+    return {
+        "id": int(rid),
+        "name": str(name),
+        "description": str(desc or ""),
+        "created_ts": float(created_ts),
+        "updated_ts": float(updated_ts),
+    }
+
+
+def _draw_detections_overlay(image_bgr: np.ndarray, detections: list[dict[str, Any]]) -> np.ndarray:
+    out = image_bgr.copy()
+    colors = [
+        (239, 68, 68),
+        (245, 158, 11),
+        (234, 179, 8),
+        (132, 204, 22),
+        (139, 92, 246),
+        (6, 182, 212),
+    ]
+    for det in detections:
+        cls_id = int(det.get("class_id", 0))
+        color = colors[abs(cls_id) % len(colors)]
+        x1, y1, x2, y2 = [int(round(v)) for v in det.get("bbox_xyxy", [0, 0, 0, 0])]
+        conf = normalize_confidence(det.get("confidence", 0.0)) * 100.0
+        name = str(det.get("class_name", f"class_{cls_id}"))
+        label = f"{name} ({conf:.1f}%)"
+        cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
+        (tw, th), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+        ty = max(0, y1 - th - baseline - 6)
+        cv2.rectangle(out, (x1, ty), (x1 + tw + 10, ty + th + baseline + 6), color, -1)
+        cv2.putText(
+            out,
+            label,
+            (x1 + 5, ty + th + 1),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+    return out
+
+
+def save_project_artifacts(
+    project_id: int,
+    image_bgr: np.ndarray,
+    detections: list[dict[str, Any]],
+) -> tuple[str, str]:
+    now_ms = int(_now_s() * 1000)
+    token = uuid.uuid4().hex[:8]
+    base_dir = PROJECT_STORAGE_ROOT / f"project_{int(project_id)}"
+    input_dir = base_dir / "inputs"
+    output_dir = base_dir / "outputs"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    stem = f"{now_ms}_{token}"
+    input_path = input_dir / f"{stem}_input.jpg"
+    output_path = output_dir / f"{stem}_output.jpg"
+    cv2.imwrite(str(input_path), image_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+    rendered = _draw_detections_overlay(image_bgr, detections)
+    cv2.imwrite(str(output_path), rendered, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+
+    try:
+        input_rel = input_path.relative_to(ROOT).as_posix()
+        output_rel = output_path.relative_to(ROOT).as_posix()
+    except Exception:
+        input_rel = str(input_path)
+        output_rel = str(output_path)
+    return input_rel, output_rel
+
+
+def append_analysis_history(entry: dict[str, Any], project_id: int | None = None) -> int:
+    payload = dict(entry or {})
+    stage = str(payload.get("stage", "deep"))
+    has_crack = bool(payload.get("has_crack", False))
+    max_conf = normalize_confidence(payload.get("max_confidence", 0.0))
+    detections_count = max(0, int(payload.get("detections_count", 0)))
+    infer_time_ms = max(0.0, float(payload.get("infer_time_ms", 0.0)))
+    input_source = str(payload.get("input_source", "upload"))
+    scene = str(payload.get("scene", "default"))
+    input_path = str(payload.get("input_path", ""))
+    output_path = str(payload.get("output_path", ""))
+    payload_json = json.dumps(payload, ensure_ascii=True)
+
+    with _stream_db_lock:
+        conn = sqlite3.connect(str(STREAM_STATE_DB_PATH))
+        try:
+            pid = _resolve_project_id(conn, project_id=project_id)
+            cur = conn.execute(
+                """
+                INSERT INTO analysis_history(
+                    ts, project_id, stage, has_crack, max_confidence, detections_count,
+                    infer_time_ms, input_source, scene, input_path, output_path, payload_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _now_s(),
+                    int(pid),
+                    stage,
+                    int(has_crack),
+                    float(max_conf),
+                    int(detections_count),
+                    float(infer_time_ms),
+                    input_source,
+                    scene,
+                    input_path,
+                    output_path,
+                    payload_json,
+                ),
+            )
+            conn.execute(
+                "UPDATE projects SET updated_ts = ? WHERE id = ?",
+                (_now_s(), int(pid)),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+        finally:
+            conn.close()
+
+
+def query_analysis_history(limit: int = 50, project_id: int | None = None) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(1000, int(limit)))
+    out: list[dict[str, Any]] = []
+    clauses: list[str] = []
+    args: list[Any] = []
+    if project_id is not None and int(project_id) > 0:
+        clauses.append("h.project_id = ?")
+        args.append(int(project_id))
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+    with _stream_db_lock:
+        conn = sqlite3.connect(str(STREAM_STATE_DB_PATH))
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT h.id, h.ts, h.project_id, p.name, h.stage, h.has_crack, h.max_confidence,
+                       h.detections_count, h.infer_time_ms, h.input_source, h.scene,
+                       h.input_path, h.output_path, h.payload_json
+                FROM analysis_history h
+                LEFT JOIN projects p ON p.id = h.project_id
+                {where_sql}
+                ORDER BY h.id DESC
+                LIMIT ?
+                """,
+                tuple([*args, safe_limit]),
+            ).fetchall()
+        finally:
+            conn.close()
+
+    for row in rows:
+        (
+            rid,
+            ts,
+            pid,
+            pname,
+            stage,
+            has_crack,
+            max_conf,
+            det_count,
+            infer_ms,
+            input_source,
+            scene,
+            input_path,
+            output_path,
+            payload_json,
+        ) = row
+        try:
+            payload = json.loads(payload_json)
+        except Exception:
+            payload = {}
+        out.append(
+            {
+                "id": int(rid),
+                "ts": float(ts),
+                "project_id": int(pid),
+                "project_name": str(pname or f"project_{pid}"),
+                "stage": str(stage),
+                "has_crack": bool(has_crack),
+                "max_confidence": float(max_conf),
+                "detections_count": int(det_count),
+                "infer_time_ms": float(infer_ms),
+                "input_source": str(input_source),
+                "scene": str(scene),
+                "input_path": str(input_path or ""),
+                "output_path": str(output_path or ""),
+                "payload": payload,
+            }
+        )
+    return out
+
+
+def get_history_artifact_path(history_id: int, kind: str) -> Path:
+    col = "input_path" if kind == "input" else "output_path"
+    with _stream_db_lock:
+        conn = sqlite3.connect(str(STREAM_STATE_DB_PATH))
+        try:
+            row = conn.execute(
+                f"SELECT {col} FROM analysis_history WHERE id = ?",
+                (int(history_id),),
+            ).fetchone()
+        finally:
+            conn.close()
+    if not row or not row[0]:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    p = (ROOT / str(row[0])).resolve()
+    root_resolved = ROOT.resolve()
+    storage_resolved = PROJECT_STORAGE_ROOT.resolve()
+    inside_root = root_resolved in p.parents or p == root_resolved
+    inside_storage = storage_resolved in p.parents or p == storage_resolved
+    if not (inside_root or inside_storage):
+        raise HTTPException(status_code=400, detail="Invalid artifact path")
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="Artifact file missing")
+    return p
+
+
+def clear_analysis_history(project_id: int | None = None) -> int:
+    clauses: list[str] = []
+    args: list[Any] = []
+    if project_id is not None and int(project_id) > 0:
+        clauses.append("project_id = ?")
+        args.append(int(project_id))
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    artifact_paths: list[str] = []
+    with _stream_db_lock:
+        conn = sqlite3.connect(str(STREAM_STATE_DB_PATH))
+        try:
+            rows = conn.execute(
+                f"SELECT input_path, output_path FROM analysis_history {where_sql}",
+                tuple(args),
+            ).fetchall()
+            for in_path, out_path in rows:
+                if in_path:
+                    artifact_paths.append(str(in_path))
+                if out_path:
+                    artifact_paths.append(str(out_path))
+            row = conn.execute(f"SELECT COUNT(1) FROM analysis_history {where_sql}", tuple(args)).fetchone()
+            deleted = int(row[0]) if row else 0
+            conn.execute(f"DELETE FROM analysis_history {where_sql}", tuple(args))
+            conn.commit()
+        finally:
+            conn.close()
+    for rel in artifact_paths:
+        try:
+            p = (ROOT / rel).resolve()
+            if p.exists():
+                p.unlink(missing_ok=True)
+        except Exception:
+            continue
+    return deleted
 
 
 def load_stream_sessions_from_db() -> dict[str, dict[str, Any]]:
@@ -1539,9 +2033,9 @@ def shutdown_cleanup() -> None:
 def health() -> dict[str, Any]:
     return {
         "ok": True,
+        "model_5class": str(MODEL_DEEP_PATH),
         "basic_model": str(MODEL_BASIC_PATH),
         "deep_model": str(MODEL_DEEP_PATH),
-        "dataset1_yaml": str(DATASET1_YAML_PATH),
         "dataset5_yaml": str(DATASET5_YAML_PATH),
         "policy": {
             "max_upload_mb": MAX_UPLOAD_MB,
@@ -1552,18 +2046,10 @@ def health() -> dict[str, Any]:
             "basic_pos_conf": BASIC_POS_CONF,
             "basic_review_conf": BASIC_REVIEW_CONF,
             "basic_imgsz_default": BASIC_IMGSZ_DEFAULT,
-            "basic_enable_deep_assist": BASIC_ENABLE_DEEP_ASSIST,
-            "basic_deep_assist_conf": BASIC_DEEP_ASSIST_CONF,
-            "basic_deep_assist_iou": BASIC_DEEP_ASSIST_IOU,
-            "basic_deep_assist_imgsz": BASIC_DEEP_ASSIST_IMGSZ,
-            "basic_deep_assist_timeout_ms": BASIC_DEEP_ASSIST_TIMEOUT_MS,
             "basic_scene_default": BASIC_SCENE,
             "deep_conf_default": DEEP_CONF_DEFAULT,
             "deep_imgsz_default": DEEP_IMGSZ_DEFAULT,
             "deep_scene_default": DEEP_SCENE,
-            "deep_fallback_basic_conf": DEEP_FALLBACK_BASIC_CONF,
-            "deep_fusion_iou": DEEP_FUSION_IOU,
-            "deep_enable_basic_fallback": DEEP_ENABLE_BASIC_FALLBACK,
             "deep_enable_tta": DEEP_ENABLE_TTA,
             "deep_tta_scales": DEEP_TTA_SCALES,
             "deep_tta_hflip": DEEP_TTA_HFLIP,
@@ -1595,6 +2081,7 @@ def health() -> dict[str, Any]:
             "stream_track_iou": STREAM_TRACK_IOU,
             "stream_track_max_age": STREAM_TRACK_MAX_AGE,
             "stream_state_db_path": str(STREAM_STATE_DB_PATH),
+            "project_storage_root": str(PROJECT_STORAGE_ROOT),
             "stream_db_sync_every": STREAM_DB_SYNC_EVERY,
             "audit_log_enable": AUDIT_LOG_ENABLE,
             "audit_db_max_events": AUDIT_DB_MAX_EVENTS,
@@ -1615,6 +2102,50 @@ def audit_events(limit: int = 100, event_type: str = "", session_id: str = "") -
     }
 
 
+@app.get("/api/history")
+def analysis_history(limit: int = 50, project_id: int = 0) -> dict[str, Any]:
+    pid = int(project_id) if int(project_id) > 0 else None
+    rows = query_analysis_history(limit=limit, project_id=pid)
+    return {
+        "ok": True,
+        "count": len(rows),
+        "limit": max(1, min(1000, int(limit))),
+        "project_id": int(project_id) if int(project_id) > 0 else None,
+        "items": rows,
+    }
+
+
+@app.delete("/api/history")
+def analysis_history_clear(project_id: int = 0) -> dict[str, Any]:
+    pid = int(project_id) if int(project_id) > 0 else None
+    deleted = clear_analysis_history(project_id=pid)
+    append_audit_event("history_clear", {"deleted": int(deleted), "project_id": pid})
+    return {"ok": True, "deleted": int(deleted), "project_id": pid}
+
+
+@app.get("/api/history/{history_id}/artifact/{kind}")
+def analysis_history_artifact(history_id: int, kind: str) -> FileResponse:
+    normalized = str(kind).strip().lower()
+    if normalized not in {"input", "output"}:
+        raise HTTPException(status_code=400, detail="Invalid artifact kind")
+    p = get_history_artifact_path(history_id, normalized)
+    return FileResponse(path=str(p), filename=p.name)
+
+
+@app.get("/api/projects")
+def projects_list(limit: int = 200) -> dict[str, Any]:
+    items = list_projects(limit=limit)
+    active_project_id = int(items[0]["id"]) if items else None
+    return {"ok": True, "count": len(items), "items": items, "active_project_id": active_project_id}
+
+
+@app.post("/api/projects")
+def projects_create(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    project = create_project(payload.get("name", ""), payload.get("description", ""))
+    append_audit_event("project_create", {"project_id": int(project["id"]), "name": str(project["name"])})
+    return {"ok": True, "project": project}
+
+
 @app.get("/", include_in_schema=False)
 def serve_index() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "index.html")
@@ -1629,6 +2160,7 @@ def analyze_basic(
     device: str = Form("auto"),
     input_source: str = Form("upload"),
     scene: str = Form(BASIC_SCENE),
+    project_id: int = Form(0),
 ) -> dict[str, Any]:
     raw_image = decode_upload(file)
     scene_resolved = normalize_scene(scene, raw_image)
@@ -1639,49 +2171,11 @@ def analyze_basic(
     infer_conf, imgsz = apply_scene_profile("basic", conf, imgsz, scene_resolved)
     t0 = time.perf_counter()
 
-    fallback = read_names_from_yaml(DATASET1_YAML_PATH) or DEFAULT_STAGE1_NAMES
-    result = run_prediction(MODEL_BASIC_PATH, image_bgr, fallback, infer_conf, iou, imgsz, device)
-    detections = list(result["detections"])
+    fallback = read_names_from_yaml(DATASET5_YAML_PATH) or DEFAULT_STAGE2_NAMES
+    result = run_prediction(MODEL_DEEP_PATH, image_bgr, fallback, infer_conf, iou, imgsz, device)
+    detections = postprocess_basic_detections(list(result["detections"]), result["width"], result["height"])
     has_crack = len(detections) > 0
     max_conf = max((float(d["confidence"]) for d in detections), default=0.0)
-    assist_used = False
-    assist_raw = 0
-    assist_timeout = False
-
-    if (not has_crack) and BASIC_ENABLE_DEEP_ASSIST:
-        fallback_deep = read_names_from_yaml(DATASET5_YAML_PATH) or DEFAULT_STAGE2_NAMES
-        assist_conf = clamp_float(BASIC_DEEP_ASSIST_CONF, 0.01, 0.99)
-        assist_size = clamp_int(BASIC_DEEP_ASSIST_IMGSZ, 320, 1536)
-        assist_conf, assist_size = apply_scene_profile("deep", assist_conf, assist_size, scene_resolved)
-        assist_result = run_prediction_with_timeout(
-            MODEL_DEEP_PATH,
-            image_bgr,
-            fallback_deep,
-            assist_conf,
-            clamp_float(BASIC_DEEP_ASSIST_IOU, 0.1, 0.95),
-            assist_size,
-            device,
-            timeout_ms=max(100, int(BASIC_DEEP_ASSIST_TIMEOUT_MS)),
-        )
-        if assist_result is None:
-            assist_timeout = True
-        else:
-            assist_raw = len(assist_result["detections"])
-            if assist_raw > 0:
-                assist_used = True
-                has_crack = True
-                detections = [
-                    {
-                        "class_id": 0,
-                        "class_name": "vet nut",
-                        "confidence": float(d["confidence"]),
-                        "bbox_xyxy": [float(v) for v in d["bbox_xyxy"]],
-                        "source": "deep_assist",
-                        "assist_class_name": d.get("class_name", ""),
-                    }
-                    for d in assist_result["detections"]
-                ]
-                max_conf = max((float(d["confidence"]) for d in detections), default=max_conf)
 
     pos_thr = clamp_float(BASIC_POS_CONF, 0.05, 0.99)
     review_thr = clamp_float(BASIC_REVIEW_CONF, 0.01, pos_thr)
@@ -1694,21 +2188,16 @@ def analyze_basic(
     else:
         triage_status = "review"
 
-    if assist_used:
-        triage_status = "review"
-    if assist_timeout and not has_crack:
-        triage_status = "review"
     total_ms = (time.perf_counter() - t0) * 1000.0
 
     append_audit_event(
         "analyze_basic",
         {
+            "project_id": int(project_id) if int(project_id) > 0 else None,
             "has_crack": bool(has_crack),
             "triage_status": str(triage_status),
             "max_confidence": round(float(max_conf), 6),
             "raw_detections": int(len(detections)),
-            "assist_used": bool(assist_used),
-            "assist_timeout": bool(assist_timeout),
             "scene": str(scene_resolved),
             "input_source": str(input_source),
             "infer_time_ms": round(float(total_ms), 3),
@@ -1717,10 +2206,30 @@ def analyze_basic(
             "height": int(result["height"]),
         },
     )
+    project = get_project(project_id if int(project_id) > 0 else None)
+    input_path, output_path = save_project_artifacts(project["id"], raw_image, detections)
+    history_id = append_analysis_history(
+        {
+            "stage": "basic5",
+            "has_crack": bool(has_crack),
+            "max_confidence": float(max_conf),
+            "detections_count": int(len(detections)),
+            "infer_time_ms": round(float(total_ms), 3),
+            "input_source": str(input_source),
+            "scene": str(scene_resolved),
+            "triage_status": str(triage_status),
+            "input_path": input_path,
+            "output_path": output_path,
+        },
+        project_id=project["id"],
+    )
 
     return {
         "ok": True,
         "stage": "basic",
+        "history_id": int(history_id),
+        "project_id": int(project["id"]),
+        "project_name": str(project["name"]),
         "has_crack": has_crack,
         "triage_status": triage_status,
         "max_confidence": max_conf,
@@ -1728,19 +2237,21 @@ def analyze_basic(
         "needs_manual_review": triage_status == "review",
         "detections": detections,
         "raw_detections": len(detections),
-        "assist_used": assist_used,
-        "assist_raw_detections": assist_raw,
-        "assist_timeout": assist_timeout,
+        "assist_used": False,
+        "assist_raw_detections": 0,
+        "assist_timeout": False,
         "infer_time_ms": round(float(total_ms), 2),
         "basic_infer_time_ms": result.get("infer_time_ms", 0.0),
         "device_used": result.get("device_used", "auto"),
         "scene": scene_resolved,
         "input_source": str(input_source),
-        "decision_mode": "legacy",
-        "policy_version": "legacy_v1",
+        "decision_mode": "single_model_5class",
+        "policy_version": "single_5class_v1",
         "width": result["width"],
         "height": result["height"],
-        "names": result["names"],
+        "input_path": input_path,
+        "output_path": output_path,
+        "names": localize_name_map(fallback),
     }
 
 
@@ -1753,6 +2264,7 @@ def analyze_deep(
     device: str = Form("auto"),
     input_source: str = Form("upload"),
     scene: str = Form(DEEP_SCENE),
+    project_id: int = Form(0),
 ) -> dict[str, Any]:
     raw_image = decode_upload(file)
     scene_resolved = normalize_scene(scene, raw_image)
@@ -1762,8 +2274,6 @@ def analyze_deep(
     iou = clamp_float(iou, 0.1, 0.95)
     imgsz = clamp_int(imgsz, 320, 1536)
     conf, imgsz = apply_scene_profile("deep", conf, imgsz, scene_resolved)
-    fallback_basic_conf = clamp_float(DEEP_FALLBACK_BASIC_CONF, 0.01, 0.99)
-    fusion_iou = clamp_float(DEEP_FUSION_IOU, 0.01, 0.95)
     t0 = time.perf_counter()
 
     fallback = read_names_from_yaml(DATASET5_YAML_PATH) or DEFAULT_STAGE2_NAMES
@@ -1773,16 +2283,6 @@ def analyze_deep(
     merged_detections = [{**det, "source": det.get("source", "deep")} for det in deep_dets]
     basic_count = 0
     fused_added = 0
-
-    if DEEP_ENABLE_BASIC_FALLBACK:
-        fallback_basic = read_names_from_yaml(DATASET1_YAML_PATH) or DEFAULT_STAGE1_NAMES
-        basic_result = run_prediction(
-            MODEL_BASIC_PATH, image_bgr, fallback_basic, fallback_basic_conf, iou, imgsz, device
-        )
-        basic_count = len(basic_result["detections"])
-        merged_detections, fused_added = fuse_deep_with_basic(
-            deep_dets, basic_result["detections"], fusion_iou
-        )
 
     merged_detections = nms_detections(
         merged_detections,
@@ -1811,6 +2311,7 @@ def analyze_deep(
     append_audit_event(
         "analyze_deep",
         {
+            "project_id": int(project_id) if int(project_id) > 0 else None,
             "raw_detections": int(final_count),
             "raw_before_postfilter": int(raw_after_merge),
             "deep_detections": int(deep_count),
@@ -1828,18 +2329,42 @@ def analyze_deep(
             "height": int(h),
         },
     )
+    project = get_project(project_id if int(project_id) > 0 else None)
+    input_path, output_path = save_project_artifacts(project["id"], raw_image, final_detections)
+    history_id = append_analysis_history(
+        {
+            "stage": "deep5",
+            "has_crack": bool(final_count > 0),
+            "max_confidence": float(max_conf),
+            "detections_count": int(final_count),
+            "infer_time_ms": round(float(infer_time_ms), 3),
+            "input_source": str(input_source),
+            "scene": str(scene_resolved),
+            "severity_level": str(severity["severity_level"]),
+            "severity_score": float(severity["severity_score"]),
+            "qa_flag": bool(quality["needs_review"]),
+            "qa_reasons": list(quality.get("reasons", [])),
+            "kpi_by_class": class_summary,
+            "input_path": input_path,
+            "output_path": output_path,
+        },
+        project_id=project["id"],
+    )
 
     return {
         "ok": True,
         "stage": "deep",
+        "history_id": int(history_id),
+        "project_id": int(project["id"]),
+        "project_name": str(project["name"]),
         "raw_detections": final_count,
         "raw_before_postfilter": raw_after_merge,
         "deep_detections": deep_count,
         "basic_detections": basic_count,
         "fused_added_from_basic": fused_added,
-        "fusion_enabled": DEEP_ENABLE_BASIC_FALLBACK,
-        "fusion_iou": fusion_iou,
-        "fallback_basic_conf": fallback_basic_conf,
+        "fusion_enabled": False,
+        "fusion_iou": 0.0,
+        "fallback_basic_conf": 0.0,
         "tta_tiling_passes": pass_stats,
         "post_filter_stats": filter_stats,
         "severity_score": severity["severity_score"],
@@ -1853,9 +2378,11 @@ def analyze_deep(
         "device_used": normalize_device(device) or AUTO_DEVICE,
         "scene": scene_resolved,
         "input_source": str(input_source),
-        "decision_mode": "legacy",
+        "decision_mode": "single_model_5class",
         "width": int(w),
         "height": int(h),
+        "input_path": input_path,
+        "output_path": output_path,
         "names": names_map or fallback,
         "detections": final_detections,
     }
@@ -1941,10 +2468,10 @@ def stream_basic_frame(
     iou = clamp_float(STREAM_IOU, 0.1, 0.95)
     imgsz = clamp_int(STREAM_IMGSZ, 320, 1536)
     conf, imgsz = apply_scene_profile("basic", conf, imgsz, scene_resolved)
-    fallback = read_names_from_yaml(DATASET1_YAML_PATH) or DEFAULT_STAGE1_NAMES
-    result = run_prediction(MODEL_BASIC_PATH, image_bgr, fallback, conf, iou, imgsz, STREAM_DEVICE)
+    fallback = read_names_from_yaml(DATASET5_YAML_PATH) or DEFAULT_STAGE2_NAMES
+    result = run_prediction(MODEL_DEEP_PATH, image_bgr, fallback, conf, iou, imgsz, STREAM_DEVICE)
 
-    detections = result["detections"]
+    detections = postprocess_basic_detections(list(result["detections"]), result["width"], result["height"])
     tracked_detections: list[dict[str, Any]]
     with _stream_lock:
         sess = _stream_sessions.get(session_id)

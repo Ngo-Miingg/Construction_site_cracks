@@ -8,6 +8,9 @@ let deepAnalysisMeta = null;
 let canvasVisible = true;
 let deepSectionInitialHtml = "";
 let activeImageToken = 0;
+let projectModal = null;
+let projectList = [];
+let currentProjectId = null;
 let streamSessionId = null;
 let streamSummarySessionId = null;
 let streamRunning = false;
@@ -20,8 +23,9 @@ let streamCandidateFrames = 0;
 let streamCandidateStore = {};
 let currentInputSource = "upload";
 
-const API_BASIC = "/api/analyze/basic";
 const API_DEEP = "/api/analyze/deep";
+const API_PROJECTS = "/api/projects";
+const API_HISTORY = "/api/history";
 const API_STREAM_START = "/api/stream/session/start";
 const API_STREAM_FRAME = "/api/stream/frame/basic";
 const API_STREAM_SUMMARY = (sessionId) => `/api/stream/session/${sessionId}/summary`;
@@ -29,21 +33,34 @@ const API_STREAM_REPORT = (sessionId) => `/api/stream/session/${sessionId}/repor
 const API_STREAM_REPORT_BUNDLE = (sessionId) => `/api/stream/session/${sessionId}/report/bundle`;
 const API_STREAM_DELETE = (sessionId) => `/api/stream/session/${sessionId}`;
 const DEFAULT_BASIC_CONF = 0.25;
-const DEFAULT_DEEP_CONF = 0.18;
+const DEFAULT_DEEP_CONF = 0.25;
 const DEFAULT_IOU = 0.6;
 const DEFAULT_BASIC_IMGSZ = 640;
-const DEFAULT_DEEP_IMGSZ = 896;
+const DEFAULT_DEEP_IMGSZ = 640;
 const DEFAULT_DEVICE = "auto";
-const CAMERA_BASIC_CONF = 0.18;
-const CAMERA_DEEP_CONF = 0.16;
-const CAMERA_BASIC_IMGSZ = 960;
-const CAMERA_DEEP_IMGSZ = 960;
-const CAMERA_IOU = 0.55;
+const CAMERA_BASIC_CONF = 0.25;
+const CAMERA_DEEP_CONF = 0.25;
+const CAMERA_BASIC_IMGSZ = 640;
+const CAMERA_DEEP_IMGSZ = 640;
+const CAMERA_IOU = 0.6;
 const CAMERA_CAPTURE_MIME = "image/png";
 const CAMERA_CAPTURE_JPEG_QUALITY = 0.95;
 const STREAM_SEND_INTERVAL_MS = 260;
 const STREAM_FRAME_JPEG_QUALITY = 0.72;
 const STREAM_MAX_CANDIDATE_CACHE = 200;
+
+async function waitForStreamIdle(maxWaitMs = 2500) {
+    const deadline = Date.now() + Math.max(100, Number(maxWaitMs) || 2500);
+    while (streamRequestBusy && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+}
+
+function normalizeConfidence01(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 0;
+    return Math.max(0, Math.min(1, n));
+}
 
 document.addEventListener("DOMContentLoaded", () => {
     if (document.getElementById("cameraModal")) {
@@ -52,16 +69,24 @@ document.addEventListener("DOMContentLoaded", () => {
             await stopRealtimeScan(false);
             stopCameraStream();
             setStreamButtonsState();
-            setStreamLiveStatus("San sang stream basic realtime");
+            setStreamLiveStatus("San sang stream realtime 5 lop");
         });
+    }
+    if (document.getElementById("projectModal")) {
+        projectModal = new bootstrap.Modal(document.getElementById("projectModal"));
     }
 
     document.getElementById("fileInput").addEventListener("change", handleFileSelect);
     deepSectionInitialHtml = document.getElementById("deepAnalysisSection").innerHTML;
-    loadHistory();
-    renderHistory();
+    loadProjects().then(() => loadHistory()).then(renderHistory).catch(() => renderHistory());
     setStreamButtonsState();
-    setStreamLiveStatus("San sang stream basic realtime");
+    setStreamLiveStatus("San sang stream realtime 5 lop");
+    window.addEventListener("resize", () => {
+        const img = document.getElementById("analysisImage");
+        if (img && img.src && img.complete && (img.naturalWidth || img.width)) {
+            setupCanvas();
+        }
+    });
 });
 
 function newImageToken() {
@@ -137,7 +162,8 @@ async function callAnalyzeApi(endpoint, file, options = {}) {
     formData.append("imgsz", String(options.imgsz ?? DEFAULT_BASIC_IMGSZ));
     formData.append("device", String(options.device ?? DEFAULT_DEVICE));
     formData.append("input_source", String(options.inputSource ?? currentInputSource ?? "upload"));
-    formData.append("scene", String(options.scene ?? "auto"));
+    formData.append("scene", String(options.scene ?? "default"));
+    formData.append("project_id", String(currentProjectId || 0));
 
     const res = await fetch(endpoint, { method: "POST", body: formData });
     if (!res.ok) {
@@ -169,6 +195,108 @@ async function callJsonApi(endpoint, method = "GET", body = null) {
     return await res.json();
 }
 
+function getStoredProjectId() {
+    const raw = localStorage.getItem("activeProjectId");
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return n;
+}
+
+function setStoredProjectId(projectId) {
+    const n = Number(projectId);
+    if (Number.isFinite(n) && n > 0) {
+        localStorage.setItem("activeProjectId", String(n));
+    } else {
+        localStorage.removeItem("activeProjectId");
+    }
+}
+
+function renderProjectSelect() {
+    const select = document.getElementById("projectSelect");
+    if (!select) return;
+    if (!projectList.length) {
+        select.innerHTML = `<option value="">Chua co du an</option>`;
+        return;
+    }
+    select.innerHTML = projectList
+        .map((p) => `<option value="${p.id}">${p.name} (${p.history_count || 0})</option>`)
+        .join("");
+    if (!currentProjectId) currentProjectId = projectList[0].id;
+    select.value = String(currentProjectId);
+}
+
+async function loadProjects() {
+    const out = await callJsonApi(`${API_PROJECTS}?limit=200`);
+    projectList = Array.isArray(out.items) ? out.items : [];
+    const preferred = getStoredProjectId();
+    if (preferred && projectList.some((p) => Number(p.id) === preferred)) {
+        currentProjectId = preferred;
+    } else if (out.active_project_id) {
+        currentProjectId = Number(out.active_project_id);
+    } else if (projectList.length) {
+        currentProjectId = Number(projectList[0].id);
+    } else {
+        currentProjectId = null;
+    }
+    setStoredProjectId(currentProjectId);
+    renderProjectSelect();
+}
+
+async function refreshProjects() {
+    try {
+        await loadProjects();
+        await loadHistory();
+        renderHistory();
+    } catch (err) {
+        alert(err.message || "Khong the tai danh sach du an.");
+    }
+}
+
+async function onProjectChange(projectId) {
+    const n = Number(projectId);
+    currentProjectId = Number.isFinite(n) && n > 0 ? n : null;
+    setStoredProjectId(currentProjectId);
+    try {
+        await loadHistory();
+        renderHistory();
+    } catch (_) {
+        renderHistory();
+    }
+}
+
+function openProjectModal() {
+    if (!projectModal) return;
+    document.getElementById("projectNameInput").value = "";
+    document.getElementById("projectDescInput").value = "";
+    projectModal.show();
+}
+
+async function createProjectFromModal() {
+    const nameEl = document.getElementById("projectNameInput");
+    const descEl = document.getElementById("projectDescInput");
+    const name = (nameEl?.value || "").trim();
+    const description = (descEl?.value || "").trim();
+    if (!name) {
+        alert("Vui long nhap ten du an.");
+        return;
+    }
+    try {
+        const out = await callJsonApi(API_PROJECTS, "POST", { name, description });
+        const pid = Number(out?.project?.id || 0);
+        await loadProjects();
+        if (pid > 0) {
+            currentProjectId = pid;
+            setStoredProjectId(pid);
+            renderProjectSelect();
+        }
+        await loadHistory();
+        renderHistory();
+        if (projectModal) projectModal.hide();
+    } catch (err) {
+        alert(err.message || "Khong tao duoc du an.");
+    }
+}
+
 async function handleFileSelect(event) {
     const file = event.target.files[0];
     if (!file || !file.type.startsWith("image/")) return;
@@ -179,9 +307,9 @@ async function handleFileSelect(event) {
     const token = newImageToken();
     showAnalysisSection(currentImageDataUrl);
     await performBasicAnalysis(token, {
-        conf: DEFAULT_BASIC_CONF,
+        conf: DEFAULT_DEEP_CONF,
         iou: DEFAULT_IOU,
-        imgsz: DEFAULT_BASIC_IMGSZ,
+        imgsz: DEFAULT_DEEP_IMGSZ,
     });
     event.target.value = "";
 }
@@ -200,11 +328,23 @@ function showAnalysisSection(imageSrc) {
 
 function setupCanvas() {
     const img = document.getElementById("analysisImage");
+    const container = document.getElementById("imageContainer");
     const canvas = document.getElementById("detectionCanvas");
-    canvas.width = img.naturalWidth || img.width;
-    canvas.height = img.naturalHeight || img.height;
-    canvas.style.width = img.offsetWidth + "px";
-    canvas.style.height = img.offsetHeight + "px";
+    const naturalW = img.naturalWidth || img.width || 1;
+    const naturalH = img.naturalHeight || img.height || 1;
+    const displayW = img.clientWidth || img.offsetWidth || naturalW;
+    const displayH = img.clientHeight || img.offsetHeight || naturalH;
+
+    canvas.width = naturalW;
+    canvas.height = naturalH;
+    canvas.style.width = `${displayW}px`;
+    canvas.style.height = `${displayH}px`;
+    canvas.style.left = `${img.offsetLeft}px`;
+    canvas.style.top = `${img.offsetTop}px`;
+
+    if (container) {
+        canvas.style.maxWidth = `${container.clientWidth}px`;
+    }
 }
 
 function clearCanvas() {
@@ -247,7 +387,7 @@ function drawStreamOverlay(detections = [], meta = {}) {
         const w = Math.max(1, x2 - x1);
         const h = Math.max(1, y2 - y1);
         const tid = det.track_id != null ? `#${det.track_id}` : "";
-        const conf = Number(det.confidence || 0) * 100;
+        const conf = normalizeConfidence01(det.confidence || 0) * 100;
         const label = `${tid} ${conf.toFixed(1)}%`.trim();
 
         ctx.strokeStyle = "rgba(239,68,68,0.95)";
@@ -278,7 +418,8 @@ function drawDetections(detections, colorForClass, width = 3) {
     detections.forEach((det) => {
         const [x1, y1, x2, y2] = det.bbox_xyxy;
         const color = colorForClass(det.class_id);
-        const label = `${formatClassName(det.class_name)} (${(det.confidence * 100).toFixed(1)}%)`;
+        const conf = normalizeConfidence01(det.confidence);
+        const label = `${formatClassName(det.class_name)} (${(conf * 100).toFixed(1)}%)`;
 
         ctx.strokeStyle = color;
         ctx.fillStyle = color;
@@ -299,35 +440,45 @@ async function performBasicAnalysis(imageToken = activeImageToken, inferOptions 
 
     try {
         updateProgress(20, "Dang gui anh len server...");
-        const basic = await callAnalyzeApi(API_BASIC, currentFile, {
-            conf: inferOptions.conf ?? DEFAULT_BASIC_CONF,
+        const deep = await callAnalyzeApi(API_DEEP, currentFile, {
+            conf: inferOptions.conf ?? DEFAULT_DEEP_CONF,
             iou: inferOptions.iou ?? DEFAULT_IOU,
-            imgsz: inferOptions.imgsz ?? DEFAULT_BASIC_IMGSZ,
+            imgsz: inferOptions.imgsz ?? DEFAULT_DEEP_IMGSZ,
             device: DEFAULT_DEVICE,
             inputSource: currentInputSource,
-            scene: inferOptions.scene ?? "auto",
+            scene: inferOptions.scene ?? "default",
         });
         if (imageToken !== activeImageToken) return;
         updateProgress(80, "Dang xu ly ket qua...");
 
-        const detections = basic.detections || [];
-        const hasCrack = !!basic.has_crack;
-        const maxConf = detections.length ? Math.max(...detections.map((d) => d.confidence)) * 100 : 0;
+        const detections = deep.detections || [];
+        const hasCrack = detections.length > 0;
+        const maxConf = detections.length
+            ? Math.max(...detections.map((d) => normalizeConfidence01(d.confidence))) * 100
+            : 0;
         const confidence = hasCrack ? maxConf : 0;
 
-        showBasicResult(hasCrack, confidence, basic);
+        showBasicResult(hasCrack, confidence, deep);
+        deepAnalysisData = detections;
+        deepAnalysisMeta = deep;
+
         if (hasCrack) {
-            drawDetections(detections, () => "#ef4444", 3);
+            drawDetections(detections, (cls) => classColor(cls), 3);
+            renderDeepResultCards(detections, deep);
         } else {
             clearCanvas();
+            renderDeepResultCards([], deep);
         }
 
-        addToHistory(hasCrack, confidence);
+        await loadHistory();
+        renderHistory();
         updateProgress(100, "Hoan thanh.");
     } catch (err) {
         if (imageToken !== activeImageToken) return;
         clearCanvas();
-        showError(err.message || "Basic analysis failed");
+        deepAnalysisData = [];
+        deepAnalysisMeta = null;
+        showError(err.message || "Phan tich 5 lop that bai");
     } finally {
         setTimeout(() => setProgressVisible(false), 300);
     }
@@ -344,40 +495,25 @@ function showBasicResult(hasCrack, confidence, basicMeta = null) {
     resultCard.style.display = "block";
     confidenceValue.textContent = confidence > 0 ? `${confidence.toFixed(1)}%` : "--";
 
-    const triage = String(basicMeta?.triage_status || "");
     if (hasCrack) {
-        resetDeepAnalysisUI(true);
+        resetDeepAnalysisUI(false);
         statusIcon.className = "status-icon has-crack";
         statusTitle.textContent = "Phat hien vet nut";
         statusTitle.style.color = "var(--danger-color)";
-        if (basicMeta?.assist_used) {
-            statusDescription.textContent =
-                "Model 1 lop bo sot, da duoc model 5 lop ho tro phat hien. Nen phan tich chuyen sau.";
-        } else {
-            statusDescription.textContent = "Nhan tiep de phan tich chuyen sau 5 lop.";
-        }
-    } else if (triage === "review") {
-        resetDeepAnalysisUI(true);
-        statusIcon.className = "status-icon has-crack";
-        statusTitle.textContent = "Can kiem tra them";
-        statusTitle.style.color = "var(--warning-color)";
-        if (basicMeta?.assist_timeout) {
-            statusDescription.textContent = "He thong ho tro qua han, vui long bam phan tich chuyen sau de xac minh.";
-        } else {
-            statusDescription.textContent = "Ket qua chua chac chan, khuyen nghi phan tich chuyen sau.";
-        }
+        statusDescription.textContent = "Da phat hien vet nut theo mo hinh RT-DETR 5 lop.";
     } else {
         resetDeepAnalysisUI(false);
         statusIcon.className = "status-icon no-crack";
         statusTitle.textContent = "Khong phat hien vet nut";
         statusTitle.style.color = "var(--success-color)";
-        statusDescription.textContent = "Be mat hien tai an toan theo ket qua quet.";
+        statusDescription.textContent = "Khong co box hop le tu mo hinh 5 lop.";
     }
 
     const t = Number(basicMeta?.infer_time_ms || 0);
     if (t > 0) {
         statusDescription.textContent += ` [${t.toFixed(0)} ms]`;
     }
+    deepAnalysisSection.style.display = "block";
 }
 
 function showError(message) {
@@ -420,46 +556,20 @@ function formatClassName(name) {
 
 async function performDeepAnalysis() {
     if (!currentFile) return;
-    const imageToken = activeImageToken;
     const deepConf = currentInputSource === "camera" ? CAMERA_DEEP_CONF : DEFAULT_DEEP_CONF;
     const deepIou = currentInputSource === "camera" ? CAMERA_IOU : DEFAULT_IOU;
     const deepImgsz = currentInputSource === "camera" ? CAMERA_DEEP_IMGSZ : DEFAULT_DEEP_IMGSZ;
-
-    const deepSection = document.getElementById("deepAnalysisSection");
-    deepSection.innerHTML = `
-        <div class="analysis-progress">
-            <div class="progress-content">
-                <div class="progress-icon"><i class="bi bi-gear-fill rotating"></i></div>
-                <h4>Dang phan tich 5 lop...</h4>
-                <p class="progress-status">Xu ly du lieu...</p>
-            </div>
-        </div>
-    `;
-
-    try {
-        const deep = await callAnalyzeApi(API_DEEP, currentFile, {
-            conf: deepConf,
-            iou: deepIou,
-            imgsz: deepImgsz,
-            device: DEFAULT_DEVICE,
-            inputSource: currentInputSource,
-            scene: "auto",
-        });
-        if (imageToken !== activeImageToken) return;
-        deepAnalysisData = deep.detections || [];
-        deepAnalysisMeta = deep;
-        drawDetections(deepAnalysisData, (cls) => classColor(cls), 3);
-        renderDeepResultCards(deepAnalysisData, deepAnalysisMeta);
-    } catch (err) {
-        if (imageToken !== activeImageToken) return;
-        deepSection.innerHTML = `<div class="alert alert-danger">${err.message || "Deep analysis failed"}</div>`;
-    }
+    await performBasicAnalysis(activeImageToken, {
+        conf: deepConf,
+        iou: deepIou,
+        imgsz: deepImgsz,
+    });
 }
 
 function renderDeepResultCards(detections, meta = null) {
     const deepSection = document.getElementById("deepAnalysisSection");
     if (!detections.length) {
-        deepSection.innerHTML = `<div class="alert alert-warning">Khong co box nao o che do 5 lop.</div>`;
+        deepSection.innerHTML = `<div class="alert alert-warning">Khong co box hop le o che do 5 lop.</div>`;
         return;
     }
 
@@ -474,7 +584,7 @@ function renderDeepResultCards(detections, meta = null) {
         .map(([key, items]) => {
             const [classIdStr, className] = key.split("|");
             const classId = Number(classIdStr);
-            const avgConf = items.reduce((s, x) => s + x.confidence, 0) / items.length;
+            const avgConf = items.reduce((s, x) => s + normalizeConfidence01(x.confidence), 0) / items.length;
             const color = classColor(classId);
             const displayName = formatClassName(className);
             return `
@@ -494,11 +604,6 @@ function renderDeepResultCards(detections, meta = null) {
         })
         .join("");
 
-    const fusionInfo = meta
-        ? `<div style="color:rgba(255,255,255,0.65); font-size:0.9rem; margin-bottom:0.75rem;">
-             deep: ${meta.deep_detections ?? 0} | basic: ${meta.basic_detections ?? 0} | bo sung tu basic: ${meta.fused_added_from_basic ?? 0}
-           </div>`
-        : "";
     const severityInfo = meta
         ? `<div style="color:rgba(255,255,255,0.88); font-size:0.95rem; margin-bottom:0.6rem;">
              muc do: <strong>${meta.severity_level ?? "-"}</strong>
@@ -518,7 +623,6 @@ function renderDeepResultCards(detections, meta = null) {
         <div class="card mt-4" style="background:rgba(13,17,23,0.9); border:1px solid rgba(37,99,235,0.3);">
             <div class="card-body">
                 <h4 class="mb-3"><i class="bi bi-bounding-box-circles me-2"></i>Ket qua phan tich 5 lop</h4>
-                ${fusionInfo}
                 ${severityInfo}
                 ${qaInfo}
                 <div class="mb-3 text-center">
@@ -574,22 +678,13 @@ function resetAnalysis() {
     }
 }
 
-function addToHistory(hasCrack, confidence) {
-    analysisHistory.unshift({
-        id: Date.now(),
-        hasCrack,
-        confidence,
-        timestamp: new Date().toLocaleString("vi-VN"),
-    });
-    analysisHistory = analysisHistory.slice(0, 30);
-    localStorage.setItem("crackDetectionHistory", JSON.stringify(analysisHistory));
-    renderHistory();
-}
-
-function loadHistory() {
+async function loadHistory(limit = 30) {
     try {
-        const raw = localStorage.getItem("crackDetectionHistory");
-        analysisHistory = raw ? JSON.parse(raw) : [];
+        const qs = new URLSearchParams();
+        qs.set("limit", String(Number(limit) || 30));
+        if (currentProjectId) qs.set("project_id", String(currentProjectId));
+        const out = await callJsonApi(`${API_HISTORY}?${qs.toString()}`);
+        analysisHistory = Array.isArray(out.items) ? out.items : [];
     } catch (_) {
         analysisHistory = [];
     }
@@ -609,31 +704,51 @@ function renderHistory() {
 
     historyList.innerHTML = analysisHistory
         .map(
-            (item) => `
+            (item) => {
+                const hasCrack = Boolean(item.has_crack ?? item.hasCrack);
+                return `
             <div class="history-item">
                 <div class="history-item-header">
                     <span class="history-item-title">Phan tich #${item.id}</span>
-                    <span class="history-item-status ${item.hasCrack ? "has-crack" : "no-crack"}">
-                        ${item.hasCrack ? "CO VET NUT" : "KHONG"}
+                    <span class="history-item-status ${hasCrack ? "has-crack" : "no-crack"}">
+                        ${hasCrack ? "CO VET NUT" : "KHONG"}
                     </span>
                 </div>
-                <div class="history-item-time"><i class="bi bi-clock"></i> ${item.timestamp}</div>
-                <div style="font-size:0.85rem; color:rgba(255,255,255,0.7);">Do tin cay: ${item.confidence.toFixed(1)}%</div>
+                <div class="history-item-time"><i class="bi bi-clock"></i> ${new Date((item.ts || 0) * 1000).toLocaleString("vi-VN")}</div>
+                <div style="font-size:0.85rem; color:rgba(255,255,255,0.7);">
+                    Do tin cay: ${(normalizeConfidence01(item.max_confidence || 0) * 100).toFixed(1)}%
+                    | box: ${Number(item.detections_count || 0)}
+                    | nguon: ${item.input_source || "-"}
+                </div>
+                <div style="font-size:0.8rem; color:rgba(255,255,255,0.55); margin-top:0.25rem;">
+                    du an: ${item.project_name || "-"}
+                </div>
+                <div style="margin-top:0.35rem; display:flex; gap:0.45rem; flex-wrap:wrap;">
+                    ${item.input_path ? `<a class="btn btn-sm btn-outline-light" href="/api/history/${item.id}/artifact/input" target="_blank">Input</a>` : ""}
+                    ${item.output_path ? `<a class="btn btn-sm btn-outline-primary" href="/api/history/${item.id}/artifact/output" target="_blank">Output</a>` : ""}
+                </div>
             </div>
-        `
+        `;
+            }
         )
         .join("");
 }
 
-function clearHistory() {
+async function clearHistory() {
     if (!confirm("Ban chac chan muon xoa lich su?")) return;
+    try {
+        const qs = currentProjectId ? `?project_id=${currentProjectId}` : "";
+        await callJsonApi(`${API_HISTORY}${qs}`, "DELETE");
+    } catch (_) {}
     analysisHistory = [];
-    localStorage.removeItem("crackDetectionHistory");
+    await loadProjects().catch(() => {});
     renderHistory();
 }
 
-function showAllHistory() {
-    alert("Dang luu toi da 30 ban ghi lich su trong trinh duyet.");
+async function showAllHistory() {
+    await loadHistory(200);
+    renderHistory();
+    alert(`Da tai toi da 200 ban ghi lich su${currentProjectId ? " cua du an dang chon" : ""}.`);
 }
 
 async function openCamera() {
@@ -687,9 +802,9 @@ async function captureImage() {
 
     showAnalysisSection(currentImageDataUrl);
     await performBasicAnalysis(token, {
-        conf: CAMERA_BASIC_CONF,
+        conf: CAMERA_DEEP_CONF,
         iou: CAMERA_IOU,
-        imgsz: CAMERA_BASIC_IMGSZ,
+        imgsz: CAMERA_DEEP_IMGSZ,
     });
 }
 
@@ -721,7 +836,7 @@ async function startRealtimeScan() {
         }
 
         setStreamButtonsState();
-        setStreamLiveStatus(`Dang stream basic... session=${streamSessionId.slice(0, 8)}`, "running");
+        setStreamLiveStatus(`Dang stream realtime... session=${streamSessionId.slice(0, 8)}`, "running");
 
         streamLoopTimer = setInterval(async () => {
             if (!streamRunning || streamRequestBusy) return;
@@ -729,6 +844,9 @@ async function startRealtimeScan() {
 
             const video = document.getElementById("cameraStream");
             if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
+
+            const activeSessionId = streamSessionId;
+            if (!activeSessionId) return;
 
             streamRequestBusy = true;
             try {
@@ -750,20 +868,23 @@ async function startRealtimeScan() {
 
                 const fd = new FormData();
                 fd.append("file", frameFile);
-                fd.append("session_id", streamSessionId);
+                fd.append("session_id", activeSessionId);
                 fd.append("frame_index", String(streamFrameIndex));
                 fd.append("timestamp_sec", String(tsSec));
-                fd.append("scene", "auto");
+                fd.append("scene", "default");
 
                 const res = await fetch(API_STREAM_FRAME, { method: "POST", body: fd });
                 if (!res.ok) {
                     throw new Error(`Stream frame fail: ${res.status}`);
                 }
                 const out = await res.json();
+                if (!streamRunning || streamSessionId !== activeSessionId) {
+                    return;
+                }
                 if (out.processed) {
                     streamProcessedFrames += 1;
                     const inferMs = Number(out.infer_time_ms || 0);
-                    const maxConf = Number(out.max_confidence || 0) * 100;
+                    const maxConf = normalizeConfidence01(out.max_confidence || 0) * 100;
                     const hasCrack = !!out.has_crack;
                     const candidate = !!out.candidate_hit;
                     const trackCount = Number(out.track_count || 0);
@@ -772,7 +893,7 @@ async function startRealtimeScan() {
                         streamCandidateFrames += 1;
                         streamCandidateStore[String(out.frame_index)] = {
                             file: frameFile,
-                            confidence: Number(out.max_confidence || 0),
+                            confidence: normalizeConfidence01(out.max_confidence || 0),
                             timestamp_sec: Number(out.timestamp_sec || tsSec),
                         };
                         const keys = Object.keys(streamCandidateStore);
@@ -823,12 +944,17 @@ async function stopRealtimeScan(showSummary = true) {
 
     const wasRunning = streamRunning;
     streamRunning = false;
-    streamRequestBusy = false;
     setStreamButtonsState();
 
     if (!streamSessionId) return;
 
     const sid = streamSessionId;
+    if (wasRunning && streamRequestBusy) {
+        setStreamLiveStatus("Dang dung stream... cho xu ly frame cuoi", "running");
+        await waitForStreamIdle(2500);
+    }
+    streamRequestBusy = false;
+
     if (!wasRunning && !showSummary) {
         try {
             await callJsonApi(API_STREAM_DELETE(sid), "DELETE");
@@ -879,7 +1005,7 @@ function renderStreamSummary(summary) {
               <td>${Number(s.start_ts).toFixed(2)}s</td>
               <td>${Number(s.end_ts).toFixed(2)}s</td>
               <td>${Number(s.duration_sec).toFixed(2)}s</td>
-              <td>${(Number(s.peak_conf) * 100).toFixed(1)}%</td>
+              <td>${(normalizeConfidence01(s.peak_conf) * 100).toFixed(1)}%</td>
               <td>${s.samples}</td>
             </tr>
         `
@@ -892,7 +1018,7 @@ function renderStreamSummary(summary) {
               .slice(0, 8)
               .map((f) => {
                   const fi = Number(f.frame_index);
-                  const conf = (Number(f.confidence) * 100).toFixed(1);
+                  const conf = (normalizeConfidence01(f.confidence) * 100).toFixed(1);
                   return `<button class="btn btn-sm btn-outline-primary me-2 mb-2" onclick="runDeepFromStreamFrame(${fi})">
                             Quet sau frame ${fi} (${conf}%)
                           </button>`;
@@ -904,7 +1030,7 @@ function renderStreamSummary(summary) {
     section.innerHTML = `
       <div class="card mt-4" style="background: rgba(13,17,23,0.92); border:1px solid rgba(37,99,235,0.35);">
         <div class="card-body">
-          <h4 class="mb-3"><i class="bi bi-camera-video me-2"></i>Tong hop stream basic</h4>
+          <h4 class="mb-3"><i class="bi bi-camera-video me-2"></i>Tong hop stream realtime</h4>
           <div style="color:rgba(255,255,255,0.85); margin-bottom:0.75rem;">
             processed: ${summary?.stats?.processed_frames ?? 0}
             | skipped: ${summary?.stats?.skipped_frames ?? 0}
@@ -1007,12 +1133,10 @@ async function runDeepFromStreamFrame(frameIndex) {
     currentImageDataUrl = await fileToDataUrl(item.file);
     showAnalysisSection(currentImageDataUrl);
     await performBasicAnalysis(token, {
-        conf: CAMERA_BASIC_CONF,
+        conf: CAMERA_DEEP_CONF,
         iou: CAMERA_IOU,
-        imgsz: CAMERA_BASIC_IMGSZ,
+        imgsz: CAMERA_DEEP_IMGSZ,
     });
-    document.getElementById("deepAnalysisSection").style.display = "block";
-    await performDeepAnalysis();
     window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
 }
 

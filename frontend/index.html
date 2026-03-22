@@ -7,7 +7,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
-    <link rel="stylesheet" href="/static/style.css?v=20260309b">
+    <link rel="stylesheet" href="/static/style.css?v=20260323a">
 </head>
 <body>
     <!-- Dark Tech Background with Grid and Animated Streams -->
@@ -74,7 +74,7 @@
             </a>
             <div class="navbar-nav ms-auto d-flex flex-row align-items-center gap-3">
                 <a class="nav-link" href="#"><i class="bi bi-question-circle"></i> Bảng điều khiển</a>
-                <a class="nav-link" href="#"><i class="bi bi-file-text"></i> Dự án</a>
+                <a class="nav-link" href="#" onclick="openProjectModal(); return false;"><i class="bi bi-file-text"></i> Dự án</a>
                 <a class="nav-link" href="#"><i class="bi bi-info-circle"></i> Báo cáo</a>
                 <a class="nav-link" href="#"><i class="bi bi-gear"></i></a>
                 <a class="nav-link" href="#"><i class="bi bi-bell"></i></a>
@@ -111,6 +111,23 @@
 
         <!-- Main Content -->
         <div class="content-area">
+            <div class="project-toolbar">
+                <div class="project-toolbar-left">
+                    <span class="project-label"><i class="bi bi-folder2-open me-2"></i>Dự án hiện tại</span>
+                    <select id="projectSelect" class="form-select form-select-sm project-select" onchange="onProjectChange(this.value)">
+                        <option value="">Đang tải...</option>
+                    </select>
+                </div>
+                <div class="project-toolbar-right">
+                    <button class="btn btn-sm btn-outline-light" onclick="refreshProjects()">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Làm mới
+                    </button>
+                    <button class="btn btn-sm btn-primary" onclick="openProjectModal()">
+                        <i class="bi bi-plus-circle me-1"></i>Tạo dự án
+                    </button>
+                </div>
+            </div>
+
             <!-- Upload Section -->
             <div class="upload-section" id="uploadSection">
                 <div class="row g-4">
@@ -134,58 +151,60 @@
 
             <!-- Analysis Section -->
             <div class="analysis-section" id="analysisSection" style="display: none;">
-                <!-- Image Preview with Detection -->
-                <div class="detection-area">
-                    <div class="detection-header">
-                        <i class="bi bi-bounding-box me-2"></i>
-                        Khu vực phân tích
-                        <button class="btn btn-sm btn-outline-danger ms-auto" onclick="resetAnalysis()">
-                            <i class="bi bi-x-circle"></i> Hủy
-                        </button>
-                    </div>
-                    <div class="image-container" id="imageContainer">
-                        <img id="analysisImage" src="" alt="Analysis">
-                        <canvas id="detectionCanvas"></canvas>
-                    </div>
-                </div>
-
-                <!-- Analysis Progress -->
-                <div class="analysis-progress" id="analysisProgress" style="display: none;">
-                    <div class="progress-content">
-                        <div class="progress-icon">
-                            <i class="bi bi-gear-fill rotating"></i>
-                        </div>
-                        <h4>Đang phân tích...</h4>
-                        <p class="progress-status" id="progressStatus">Khởi tạo mô hình AI</p>
-                        <div class="progress-bar-container">
-                            <div class="progress-bar-fill" id="progressBarFill"></div>
-                        </div>
-                        <div class="progress-percentage" id="progressPercentage">0%</div>
-                    </div>
-                </div>
-
-                <!-- Basic Result -->
-                <div class="result-card mt-4" id="basicResultCard" style="display: none;">
-                    <div class="result-status" id="resultStatus">
-                        <div class="status-icon" id="statusIcon"></div>
-                        <div class="status-text">
-                            <h3 id="statusTitle"></h3>
-                            <p id="statusDescription"></p>
+                <div class="analysis-grid">
+                    <div class="analysis-left">
+                        <!-- Image Preview with Detection -->
+                        <div class="detection-area">
+                            <div class="detection-header">
+                                <i class="bi bi-bounding-box me-2"></i>
+                                Khu vực phân tích
+                                <button class="btn btn-sm btn-outline-danger ms-auto" onclick="resetAnalysis()">
+                                    <i class="bi bi-x-circle"></i> Hủy
+                                </button>
+                            </div>
+                            <div class="image-container" id="imageContainer">
+                                <img id="analysisImage" src="" alt="Analysis">
+                                <canvas id="detectionCanvas"></canvas>
+                            </div>
                         </div>
                     </div>
-                    <div class="confidence-display">
-                        <span>Độ tin cậy:</span>
-                        <strong id="confidenceValue"></strong>
-                    </div>
-                </div>
 
-                <!-- Deep Analysis Button -->
-                <div class="text-center mt-4" id="deepAnalysisSection" style="display: none;">
-                    <button class="btn btn-lg btn-deep-analysis-main" onclick="performDeepAnalysis()">
-                        <i class="bi bi-gear-fill me-2"></i>
-                        Phân tích chuyên sâu 5 lớp
-                        <i class="bi bi-chevron-right ms-2"></i>
-                    </button>
+                    <div class="analysis-right">
+                        <!-- Analysis Progress -->
+                        <div class="analysis-progress" id="analysisProgress" style="display: none;">
+                            <div class="progress-content">
+                                <div class="progress-icon">
+                                    <i class="bi bi-gear-fill rotating"></i>
+                                </div>
+                                <h4>Đang phân tích...</h4>
+                                <p class="progress-status" id="progressStatus">Khởi tạo mô hình AI</p>
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar-fill" id="progressBarFill"></div>
+                                </div>
+                                <div class="progress-percentage" id="progressPercentage">0%</div>
+                            </div>
+                        </div>
+
+                        <!-- Basic Result -->
+                        <div class="result-card" id="basicResultCard" style="display: none;">
+                            <div class="result-status" id="resultStatus">
+                                <div class="status-icon" id="statusIcon"></div>
+                                <div class="status-text">
+                                    <h3 id="statusTitle"></h3>
+                                    <p id="statusDescription"></p>
+                                </div>
+                            </div>
+                            <div class="confidence-display">
+                                <span>Độ tin cậy:</span>
+                                <strong id="confidenceValue"></strong>
+                            </div>
+                        </div>
+
+                        <!-- 5-Class Result Section -->
+                        <div id="deepAnalysisSection" style="display: none;">
+                            <div class="alert alert-info mb-0">Ket qua 5 lop se hien thi tai day.</div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -207,7 +226,7 @@
                         <canvas id="streamOverlayCanvas"></canvas>
                     </div>
                     <canvas id="cameraCanvas" style="display: none;"></canvas>
-                    <div id="streamLiveStatus" class="stream-live-status">San sang stream basic realtime</div>
+                    <div id="streamLiveStatus" class="stream-live-status">San sang stream realtime 5 lop</div>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-outline-primary" id="streamStartBtn" onclick="startRealtimeScan()">
@@ -333,7 +352,36 @@
         </div>
     </div>
 
+    <!-- Project Modal -->
+    <div class="modal fade" id="projectModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-folder-plus me-2"></i>Quản lý dự án</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Tên dự án</label>
+                        <input type="text" class="form-control" id="projectNameInput" placeholder="Ví dụ: Công trường A - Tháng 3">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Mô tả (tuỳ chọn)</label>
+                        <textarea class="form-control" id="projectDescInput" rows="3" placeholder="Ghi chú mục tiêu, khu vực, thời gian..."></textarea>
+                    </div>
+                    <small class="text-muted">Mọi ảnh detect sẽ được lưu theo dự án đã chọn để dễ quản lý input/output.</small>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                    <button class="btn btn-primary" onclick="createProjectFromModal()">
+                        <i class="bi bi-plus-circle me-1"></i>Tạo dự án
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="/static/script.js?v=20260309k"></script>
+    <script src="/static/script.js?v=20260323a"></script>
 </body>
 </html>
