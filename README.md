@@ -145,6 +145,7 @@ git lfs pull
 
 ```bash
 python -m py_compile backend/app.py demo/app_streamlit.py
+python scripts/check_project.py
 ```
 
 Neu may co `make`:
@@ -152,6 +153,8 @@ Neu may co `make`:
 ```bash
 make check-project
 ```
+
+> Luu y: khong dung `python -m make check-project`.
 
 ---
 
@@ -255,3 +258,16 @@ Xem file `.env.example`, cac nhom quan trong:
 - Dashboard thong ke theo du an/thoi gian.
 
 ---
+
+## 17) Truoc khi push len Git
+
+```bash
+git status
+python -m py_compile backend/app.py demo/app_streamlit.py
+```
+
+Repo da cau hinh `.gitignore` de bo qua artifact tam thoi (report `.docx`, formula image sinh tu script, lock file Office) giup lich su commit gon de showcase.
+
+---
+
+Neu ban can, minh co the viet tiep ban README song ngu (VI/EN) de repo trong "chuyen nghiep" hon khi share cong khai.

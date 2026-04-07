@@ -14,6 +14,4 @@ check-models:
 	python -c "from pathlib import Path; req=['models/best5class.pt']; miss=[p for p in req if not Path(p).exists()]; print('OK' if not miss else f'MISSING: {miss}')"
 
 check-project:
-	python -c "from pathlib import Path; req=['models/best5class.pt','configs/dataset5class.yaml','frontend/index.html','frontend/script.js','frontend/style.css','backend/app.py']; miss=[p for p in req if not Path(p).exists()]; print('PROJECT OK' if not miss else f'MISSING: {miss}')"
-	python -m py_compile demo/app_streamlit.py
-	python -m py_compile backend/app.py
+	python scripts/check_project.py

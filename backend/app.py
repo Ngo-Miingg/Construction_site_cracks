@@ -183,6 +183,7 @@ CLASS_NAME_MAP_VI = {
 }
 
 _model_cache: dict[str, tuple[int, Any]] = {}
+_dataset_names_cache: tuple[int, dict[int, str]] | None = None
 _stream_sessions: dict[str, dict[str, Any]] = {}
 _stream_lock = threading.Lock()
 _stream_db_lock = threading.Lock()
@@ -214,6 +215,28 @@ def read_names_from_yaml(yaml_path: Path) -> dict[int, str]:
                 continue
         return out
     return {}
+
+
+def get_stage2_names() -> dict[int, str]:
+    """
+    Return localized class names for runtime inference.
+
+    Cache by file mtime to avoid re-reading YAML on every request while still
+    reflecting updates if the dataset config changes.
+    """
+    global _dataset_names_cache
+    try:
+        version = int(DATASET5_YAML_PATH.stat().st_mtime_ns)
+    except Exception:
+        version = -1
+
+    if _dataset_names_cache is not None and _dataset_names_cache[0] == version:
+        return dict(_dataset_names_cache[1])
+
+    names = read_names_from_yaml(DATASET5_YAML_PATH) or DEFAULT_STAGE2_NAMES
+    localized = localize_name_map(names)
+    _dataset_names_cache = (version, localized)
+    return dict(localized)
 
 
 def localize_class_name(name: str) -> str:
@@ -2008,7 +2031,7 @@ def clamp_int(v: int, min_v: int, max_v: int) -> int:
 def startup_check() -> None:
     if not FRONTEND_DIR.exists():
         raise RuntimeError(f"Missing frontend directory: {FRONTEND_DIR}")
-    for required in [MODEL_BASIC_PATH, MODEL_DEEP_PATH]:
+    for required in {MODEL_BASIC_PATH, MODEL_DEEP_PATH}:
         if not required.exists():
             raise RuntimeError(f"Missing model file: {required}")
     ensure_stream_db()
@@ -2020,8 +2043,8 @@ def startup_check() -> None:
         for sess in _stream_sessions.values():
             _ensure_stream_tracking_state(sess)
     # Preload weights to avoid first-request latency spikes.
-    load_model_cached(MODEL_BASIC_PATH)
-    load_model_cached(MODEL_DEEP_PATH)
+    for model_path in {MODEL_BASIC_PATH, MODEL_DEEP_PATH}:
+        load_model_cached(model_path)
 
 
 @app.on_event("shutdown")
@@ -2171,7 +2194,7 @@ def analyze_basic(
     infer_conf, imgsz = apply_scene_profile("basic", conf, imgsz, scene_resolved)
     t0 = time.perf_counter()
 
-    fallback = read_names_from_yaml(DATASET5_YAML_PATH) or DEFAULT_STAGE2_NAMES
+    fallback = get_stage2_names()
     result = run_prediction(MODEL_DEEP_PATH, image_bgr, fallback, infer_conf, iou, imgsz, device)
     detections = postprocess_basic_detections(list(result["detections"]), result["width"], result["height"])
     has_crack = len(detections) > 0
@@ -2251,7 +2274,7 @@ def analyze_basic(
         "height": result["height"],
         "input_path": input_path,
         "output_path": output_path,
-        "names": localize_name_map(fallback),
+        "names": fallback,
     }
 
 
@@ -2276,7 +2299,7 @@ def analyze_deep(
     conf, imgsz = apply_scene_profile("deep", conf, imgsz, scene_resolved)
     t0 = time.perf_counter()
 
-    fallback = read_names_from_yaml(DATASET5_YAML_PATH) or DEFAULT_STAGE2_NAMES
+    fallback = get_stage2_names()
     deep_dets, pass_stats, names_map = run_deep_ensemble(image_bgr, conf, iou, imgsz, device, fallback)
     deep_count = len(deep_dets)
 
@@ -2468,7 +2491,7 @@ def stream_basic_frame(
     iou = clamp_float(STREAM_IOU, 0.1, 0.95)
     imgsz = clamp_int(STREAM_IMGSZ, 320, 1536)
     conf, imgsz = apply_scene_profile("basic", conf, imgsz, scene_resolved)
-    fallback = read_names_from_yaml(DATASET5_YAML_PATH) or DEFAULT_STAGE2_NAMES
+    fallback = get_stage2_names()
     result = run_prediction(MODEL_DEEP_PATH, image_bgr, fallback, conf, iou, imgsz, STREAM_DEVICE)
 
     detections = postprocess_basic_detections(list(result["detections"]), result["width"], result["height"])

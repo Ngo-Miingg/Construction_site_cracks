@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
 runs/
 outputs/
 !models/.gitkeep
@@ -10,3 +11,12 @@ RDD_SPLIT/**/__pycache__/
 *.ipynb_checkpoints
 _preflight_work/
 *.zip
+~$*.docx
+
+# Local research/report artifacts (keep repo focused on product code)
+BAO_CAO_DE_TAI_*.docx
+images/formulas/
+images/BoxF1_curve.png
+images/BoxP_curve.png
+images/BoxR_curve.png
+images/confusion_matrix.png
